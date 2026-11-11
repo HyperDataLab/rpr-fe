@@ -152,9 +152,30 @@ export default function PublicPreprintLanding() {
               </button>
               {toolsMenuOpen && (
                 <div className="pl-tools-menu__panel" id="pl-tools-menu-panel" aria-label="Công cụ HyperDataLab">
-                  <a href="https://slr.hyperdata.lab" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">Systematic Literature Review</a>
-                  <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">Writing Bank</a>
-                  <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">Academic Publication Repository</a>
+                  <div className="pl-tools-menu__content">
+                    <div className="pl-tools-menu__intro">
+                      <span className="pl-tools-menu__eyebrow">Hệ sinh thái HyperDataLab</span>
+                      <h2>Công cụ nghiên cứu</h2>
+                      <p>Khám phá các nền tảng hỗ trợ quy trình nghiên cứu và xuất bản học thuật.</p>
+                    </div>
+                    <div className="pl-tools-menu__grid">
+                      <a href="https://slr.hyperdatalab.org" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">
+                        <span className="pl-tools-menu__icon" aria-hidden="true">⌕</span>
+                        <span className="pl-tools-menu__item-copy"><strong>Systematic Literature Review</strong><span>Quản lý và sàng lọc nghiên cứu tổng quan có hệ thống.</span></span>
+                        <span className="pl-tools-menu__external" aria-hidden="true">↗</span>
+                      </a>
+                      <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">
+                        <span className="pl-tools-menu__icon" aria-hidden="true">✎</span>
+                        <span className="pl-tools-menu__item-copy"><strong>Writing Bank</strong><span>Tham khảo tài nguyên và hướng dẫn viết học thuật.</span></span>
+                        <span className="pl-tools-menu__external" aria-hidden="true">↗</span>
+                      </a>
+                      <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">
+                        <span className="pl-tools-menu__icon" aria-hidden="true">▤</span>
+                        <span className="pl-tools-menu__item-copy"><strong>Academic Publication Repository</strong><span>Tra cứu kho công bố và tài liệu nghiên cứu học thuật.</span></span>
+                        <span className="pl-tools-menu__external" aria-hidden="true">↗</span>
+                      </a>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -193,7 +214,7 @@ export default function PublicPreprintLanding() {
               <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Hỏi Đáp</a>
               <div className="pl-mobile-nav__tools">
                 <span className="pl-mobile-nav__tools-title">Công Cụ HyperDataLab</span>
-                <a href="https://slr.hyperdata.lab" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Systematic Literature Review</a>
+                <a href="https://slr.hyperdatalab.org" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Systematic Literature Review</a>
                 <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Writing Bank</a>
                 <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Academic Publication Repository</a>
               </div>
