@@ -312,9 +312,17 @@ service cloud.firestore {
     }
 
     match /publications/{publicationId} {
-      allow get, list: if isAdmin()
-        || (activeUser() && resource.data.uploaderId == request.auth.uid)
-        || canReadPublication(publicationId);
+      allow get: if canReadPublication(publicationId);
+      allow list: if isAdmin();
+      allow list: if activeUser() && resource.data.uploaderId == request.auth.uid;
+      allow list: if resource.data.status == 'PUBLISHED'
+        && resource.data.isPrivate == false
+        && ('GUEST' in resource.data.audiences);
+      allow list: if activeUser()
+        && resource.data.status == 'PUBLISHED'
+        && resource.data.isPrivate == false
+        && ((profile(request.auth.uid).role == 'STUDENT' && ('STUDENT' in resource.data.audiences))
+          || (profile(request.auth.uid).role == 'LECTURER' && ('LECTURER' in resource.data.audiences)));
       allow create: if activeUser()
         && request.resource.data.id == publicationId
         && request.resource.data.uploaderId == request.auth.uid

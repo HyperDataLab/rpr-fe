@@ -82,6 +82,14 @@
       ]
     },
     {
+      "collectionGroup": "publicationVersionAuthors",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "publicationVersionId", "order": "ASCENDING" },
+        { "fieldPath": "orderIndex", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "publicationReviews",
       "queryScope": "COLLECTION",
       "fields": [
