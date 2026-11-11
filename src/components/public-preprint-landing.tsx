@@ -59,6 +59,7 @@ export default function PublicPreprintLanding() {
   const [successData, setSuccessData] = useState<{ username: string; email: string; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
 
   useEffect(() => {
     // Only kept for any non-Lenis side effects if needed, 
@@ -127,6 +128,36 @@ export default function PublicPreprintLanding() {
             <a href="#features" className="pl-nav__link">Tính Năng</a>
             <a href="#workflow" className="pl-nav__link">Quy Trình</a>
             <a href="#faq" className="pl-nav__link">Hỏi Đáp</a>
+            <div
+              className="pl-tools-menu"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setToolsMenuOpen(false);
+                  event.currentTarget.querySelector('button')?.focus();
+                }
+              }}
+            >
+              <button
+                type="button"
+                className="pl-nav__link pl-tools-menu__toggle"
+                aria-haspopup="true"
+                aria-expanded={toolsMenuOpen}
+                aria-controls="pl-tools-menu-panel"
+                onClick={() => setToolsMenuOpen((open) => !open)}
+              >
+                Công Cụ
+                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <path d="m3 6 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {toolsMenuOpen && (
+                <div className="pl-tools-menu__panel" id="pl-tools-menu-panel" aria-label="Công cụ HyperDataLab">
+                  <a href="https://slr.hyperdata.lab" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">Systematic Literature Review</a>
+                  <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">Writing Bank</a>
+                  <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">Academic Publication Repository</a>
+                </div>
+              )}
+            </div>
           </nav>
 
           <div className="pl-header__actions">
@@ -160,6 +191,12 @@ export default function PublicPreprintLanding() {
               <a href="#features" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Tính Năng</a>
               <a href="#workflow" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Quy Trình</a>
               <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Hỏi Đáp</a>
+              <div className="pl-mobile-nav__tools">
+                <span className="pl-mobile-nav__tools-title">Công Cụ HyperDataLab</span>
+                <a href="https://slr.hyperdata.lab" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Systematic Literature Review</a>
+                <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Writing Bank</a>
+                <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Academic Publication Repository</a>
+              </div>
             </div>
           </div>
         </div>
