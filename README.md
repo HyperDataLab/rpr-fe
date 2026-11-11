@@ -6,18 +6,18 @@ Next.js frontend for the public repository, student submission workspace, lectur
 
 - Firebase Authentication owns browser sign-in and password resets.
 - The Firebase Web SDK reads and writes Firestore directly. `firestore.rules` is the authorization boundary; do not rely on UI role checks alone.
-- The Cloudflare Worker owns PDF access through its R2 bucket binding and forwards authenticated PDF analysis requests to the private GROBID service.
+- The Cloudflare Worker owns authenticated PDF access through its R2 bucket binding. The manuscript form sends PDFs to the configured GROBID HTTPS service for metadata extraction.
 - The previous Fastify API is no longer part of the frontend runtime. Its code remains in the sibling repository as the reference for existing Firestore records and business behavior.
 
 The Worker source and deployment config currently live at `../ResearchPulse-Publication-Repository-BE/worker`. This is a Cloudflare Worker, not the old Fastify API.
 
 ## Configure Firebase and the Worker
 
-1. Copy `.env.example` to `.env.local` and fill the Firebase Web app values and the deployed Worker URL.
+1. Copy `.env.example` to `.env.local` and fill the Firebase Web app values, the deployed Worker URL, and `NEXT_PUBLIC_GROBID_URL` (defaults to `https://grobid.hyperdatalab.org`).
 2. Enable Email/Password in Firebase Authentication.
 3. Deploy Firestore rules and indexes from this directory with `firebase deploy --only firestore:rules,firestore:indexes --project hyperdatalab-27172`.
 4. Bind the existing `storage-pdf` bucket to the Worker. Set `FRONTEND_ORIGINS` to the exact deployed FE origin(s), and set the Firebase Web API key in the Worker environment.
-5. Deploy the Worker from `../ResearchPulse-Publication-Repository-BE/worker` with Wrangler. The GROBID VPC network must remain connected for PDF analysis.
+5. Deploy the Worker from `../ResearchPulse-Publication-Repository-BE/worker` with Wrangler for R2 access. Its GROBID VPC forwarding route is only needed when using a private GROBID service instead of the configured public HTTPS endpoint.
 
 The Firebase Web API key and web app configuration are client identifiers, not service-account credentials. Never put a Firebase service-account key or an R2 access key in this repository or a `NEXT_PUBLIC_*` variable. The Worker uses the R2 binding and does not need S3 credentials.
 

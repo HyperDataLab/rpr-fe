@@ -377,6 +377,11 @@ async function uploadPdfToWorker(file: File) {
   return body.data.objectKey;
 }
 
+function grobidBaseUrl() {
+  const url = process.env.NEXT_PUBLIC_GROBID_URL?.trim() || 'https://grobid.hyperdatalab.org';
+  return url.replace(/\/$/, '');
+}
+
 function parseTei(teiXml: string): Parameters<typeof mapAnalysis>[0] {
   const xml = new DOMParser().parseFromString(teiXml, 'application/xml');
   if (xml.querySelector('parsererror')) throw new PreprintApiError('GROBID trả về TEI XML không hợp lệ.', 'GROBID_INVALID_RESPONSE');
@@ -401,12 +406,27 @@ function parseTei(teiXml: string): Parameters<typeof mapAnalysis>[0] {
   return { title: title || undefined, abstract: abstract || undefined, doi, publicationDate, keywords, authors };
 }
 
-async function analyzeWithWorker(file: File): Promise<Parameters<typeof mapAnalysis>[0]> {
+async function analyzeWithGrobid(file: File): Promise<Parameters<typeof mapAnalysis>[0]> {
   const form = new FormData();
-  form.append('file', file);
+  form.append('input', file, file.name);
+  form.append('consolidateHeader', '0');
   try {
-    const response = await workerRequest('/api/processHeaderDocument', { method: 'POST', body: form });
-    const parsed = parseTei(await response.text());
+    const response = await fetch(`${grobidBaseUrl()}/api/processHeaderDocument`, {
+      method: 'POST',
+      headers: { Accept: 'application/xml' },
+      body: form,
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      const details = (await response.text().catch(() => '')).slice(0, 500);
+      throw new PreprintApiError(
+        details || `GROBID request failed (${response.status}).`,
+        `GROBID_${response.status}`,
+      );
+    }
+    const teiXml = await response.text();
+    if (!teiXml.trim()) throw new PreprintApiError('GROBID không trích xuất được dữ liệu từ PDF này.', 'GROBID_EMPTY_RESPONSE');
+    const parsed = parseTei(teiXml);
     if (!parsed.authors.length) {
       const user = await signedInUser();
       const profile = await getDoc(doc(firestoreDb(), c.profiles, user.uid));
@@ -420,21 +440,10 @@ async function analyzeWithWorker(file: File): Promise<Parameters<typeof mapAnaly
       }];
     }
     return parsed;
-  } catch {
-    const user = await signedInUser();
-    const profile = await getDoc(doc(firestoreDb(), c.profiles, user.uid));
-    const data = profile.data() || {};
-    return {
-      title: file.name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').trim(),
-      keywords: [],
-      authors: [{
-        name: String(data.name || [data.firstName, data.lastName].filter(Boolean).join(' ') || user.displayName || user.email || 'Author'),
-        email: user.email || undefined,
-        studentId: typeof data.studentId === 'string' ? data.studentId : undefined,
-        role: data.role === 'LECTURER' ? 'LECTURER' : 'STUDENT',
-        userId: user.uid,
-      }],
-    };
+  } catch (error) {
+    if (error instanceof PreprintApiError) throw error;
+    const message = error instanceof Error ? error.message : 'Không kết nối được dịch vụ GROBID.';
+    throw new PreprintApiError(`Không thể trích xuất PDF bằng GROBID: ${message}`, 'GROBID_UNAVAILABLE');
   }
 }
 
@@ -710,7 +719,7 @@ export const studentPreprintApi = {
       throw new PreprintApiError('Chỉ chấp nhận tệp PDF.', 'INVALID_FILE_TYPE');
     }
     if (!file.size) throw new PreprintApiError('Tệp PDF rỗng.', 'EMPTY_FILE');
-    return mapAnalysis(await analyzeWithWorker(file));
+    return mapAnalysis(await analyzeWithGrobid(file));
   },
 
   upload: async (
@@ -794,7 +803,7 @@ export const studentPreprintApi = {
     if (publication.uploaderId !== user.uid) throw new PreprintApiError('Bạn chỉ có thể tạo phiên bản mới cho bài báo của mình.', 'FORBIDDEN');
     if (publication.status !== 'DRAFTING') throw new PreprintApiError('Published papers need the new-version workflow before they can receive revisions.', 'INVALID_STATUS');
     const objectKey = await uploadPdfToWorker(file);
-    const analysis = await analyzeWithWorker(file);
+    const analysis = await analyzeWithGrobid(file);
     const versions = await rows(c.versions, where('publicationId', '==', id), orderBy('versionNumber', 'desc'));
     const latest = versions[0];
     const currentVersion = versions.find((version) => version.id === publication.currentVersionId) || latest;
@@ -840,7 +849,7 @@ export const studentPreprintApi = {
     if (publication.uploaderId !== user.uid) throw new PreprintApiError('Bạn chỉ có thể xử lý lại tệp của mình.', 'FORBIDDEN');
     const response = await workerRequest(`/r2/object?key=${encodeURIComponent(objectKey)}&publicationId=${encodeURIComponent(publication.id)}`);
     const file = new File([await response.blob()], fileName || fileNameFromObjectKey(objectKey) || 'publication.pdf', { type: 'application/pdf' });
-    const analysis = await analyzeWithWorker(file);
+    const analysis = await analyzeWithGrobid(file);
     const currentVersionId = String(publication.currentVersionId || '');
     const batch = writeBatch(firestoreDb());
     const values = {
