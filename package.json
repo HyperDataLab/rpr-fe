@@ -8,7 +8,10 @@
     "start": "next start -p 3003",
     "lint": "next lint",
     "seed": "node --env-file=.env.local scripts/seed-firebase-users.mjs",
-    "seed:firebase-users": "npm run seed"
+    "seed:firebase-users": "npm run seed",
+    "worker:dev": "npx --yes wrangler@4.160.1 dev --config worker/wrangler.toml --port 8787",
+    "worker:deploy": "npx --yes wrangler@4.160.1 deploy --config worker/wrangler.toml",
+    "worker:tail": "npx --yes wrangler@4.160.1 tail --config worker/wrangler.toml"
   },
   "dependencies": {
     "@hyperdata/design-system": "file:./packages/design-system",

@@ -1,0 +1,2 @@
+# Needed only for Worker registration and invitation routes.
+FIREBASE_WEB_API_KEY=

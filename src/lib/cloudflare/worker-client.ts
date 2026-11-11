@@ -50,12 +50,28 @@ export async function fetchPdfFromWorker(objectKey: string, publicationId: strin
   const url = new URL(`${baseUrl}/r2/object`);
   url.searchParams.set('key', objectKey);
   url.searchParams.set('publicationId', publicationId);
-  let response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' });
+  const signal = AbortSignal.timeout(45_000);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store', signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error('PDF download timed out. Check the connection to Cloudflare R2 and try again.');
+    }
+    throw error;
+  }
   // The Worker independently checks that anonymous requests point to a published,
   // non-private GUEST publication. Retry without auth so pending accounts can
   // still read public PDFs; access to restricted objects remains denied there.
   if (response.status === 401 || response.status === 403) {
-    response = await fetch(url, { cache: 'no-store' });
+    try {
+      response = await fetch(url, { cache: 'no-store', signal });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new Error('PDF download timed out. Check the connection to Cloudflare R2 and try again.');
+      }
+      throw error;
+    }
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { message?: string } | null;

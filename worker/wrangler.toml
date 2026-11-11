@@ -1,0 +1,17 @@
+name = "rpr-grobid-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-11-11"
+
+[vars]
+GROBID_ORIGIN = "http://100.121.61.95:8070"
+FIREBASE_PROJECT_ID = "hyperdatalab-27172"
+FRONTEND_ORIGINS = "http://localhost:3003,http://localhost:3000,http://100.115.150.106:3003"
+
+[[r2_buckets]]
+binding = "PUBLICATION_PDFS"
+bucket_name = "storage-pdf"
+
+[[vpc_networks]]
+binding = "PRIVATE_NETWORK"
+network_id = "cf1:network"
+remote = true

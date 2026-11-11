@@ -17,6 +17,10 @@ coverage/
 # Firebase Admin service-account private keys
 *firebase-adminsdk-*.json
 
+# Cloudflare Worker local credentials and state
+worker/.dev.vars
+worker/.wrangler/
+
 # Logs
 *.log
 npm-debug.log*
