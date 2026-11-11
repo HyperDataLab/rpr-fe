@@ -312,7 +312,9 @@ service cloud.firestore {
     }
 
     match /publications/{publicationId} {
-      allow get, list: if isAdmin() || canReadPublication(publicationId);
+      allow get, list: if isAdmin()
+        || (activeUser() && resource.data.uploaderId == request.auth.uid)
+        || canReadPublication(publicationId);
       allow create: if activeUser()
         && request.resource.data.id == publicationId
         && request.resource.data.uploaderId == request.auth.uid
