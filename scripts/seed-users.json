@@ -1,0 +1,46 @@
+{
+    "description":  "Demo Firebase Auth users and userProfiles for the three quick-login buttons on /login.",
+    "users":  [
+                  {
+                      "email":  "phuonglhk@gmail.com",
+                      "displayName":  "Quick Test Admin",
+                      "profile":  {
+                                      "name":  "Quick Test Admin",
+                                      "firstName":  "Seed",
+                                      "lastName":  "Admin",
+                                      "role":  "ADMIN",
+                                      "status":  "APPROVED",
+                                      "isActive":  true,
+                                      "affiliation":  "ResearchPulse Demo University"
+                                  }
+                  },
+                  {
+                      "email":  "phuonglhk@fpt.edu.vn",
+                      "displayName":  "Quick Test Lecturer",
+                      "profile":  {
+                                      "name":  "Quick Test Lecturer",
+                                      "firstName":  "Seed",
+                                      "lastName":  "Lecturer",
+                                      "role":  "LECTURER",
+                                      "status":  "APPROVED",
+                                      "isActive":  true,
+                                      "affiliation":  "ResearchPulse Demo University"
+                                  }
+                  },
+                  {
+                      "email":  "duyga544@gmail.com",
+                      "displayName":  "Quick Test Student",
+                      "profile":  {
+                                      "name":  "Quick Test Student",
+                                      "firstName":  "Seed",
+                                      "lastName":  "Student",
+                                      "role":  "STUDENT",
+                                      "status":  "APPROVED",
+                                      "isActive":  true,
+                                      "studentId":  "SEED-2026",
+                                      "major":  "Computer Science",
+                                      "affiliation":  "ResearchPulse Demo University"
+                                  }
+                  }
+              ]
+}

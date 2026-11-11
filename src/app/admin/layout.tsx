@@ -1,8 +1,5 @@
-import { requireAreaAccess } from '../../lib/route-guards';
+import { AreaAccessGuard } from '@/features/auth/components/AreaAccessGuard';
 
-export const dynamic = 'force-dynamic';
-
-export default async function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  await requireAreaAccess('admin');
-  return children;
+export default function AdminLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <AreaAccessGuard area="admin">{children}</AreaAccessGuard>;
 }

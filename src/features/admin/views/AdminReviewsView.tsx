@@ -45,7 +45,7 @@ export function AdminReviewsView() {
       let items: AdminReview[] = [];
       let primaryFailed = false;
 
-      // Primary attempt: fetch directly from /api/v1/admin/reviews
+      // Load reviews from the active admin data adapter.
       try {
         const res = await adminApi.listAllReviews();
         if (res && 'items' in res && Array.isArray(res.items)) {

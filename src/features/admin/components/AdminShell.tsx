@@ -3,14 +3,15 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { PageHeader } from '@hyperdata/design-system';
 
 import { ROUTES } from '@/app/router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { authApi } from '@/features/auth/api/authApi';
-import { adminApi } from '../api';
 import { useTranslation } from '@/i18n';
 import { NotificationBell } from '@/shared/components/NotificationBell';
+import { firestoreDb } from '@/lib/firebase/client';
 
 export type AdminNavKey = 'dashboard' | 'submissions' | 'reviews' | 'users' | 'registrations' | 'profile';
 
@@ -22,7 +23,6 @@ export interface AdminShellProps {
 }
 
 let globalPendingCountCache: number | undefined = undefined;
-let lastPendingCountFetchTime = 0;
 
 export function AdminSidebar({
   active,
@@ -48,42 +48,18 @@ export function AdminSidebar({
   }, [pendingCount]);
 
   useEffect(() => {
-    const now = Date.now();
-    // If recently fetched within 15 seconds, don't hit the DB again
-    if (now - lastPendingCountFetchTime >= 15000 || globalPendingCountCache === undefined) {
-      lastPendingCountFetchTime = now;
-      adminApi
-        .listPendingUsers({ limit: 1 })
-        .then((res) => {
-          const count = res.pagination?.total ?? res.users.length;
-          globalPendingCountCache = count;
-          setInternalPendingCount(count);
-        })
-        .catch(() => {});
-    }
-
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource('/api/admin/registrations/stream');
-      es.addEventListener('registration:new', () => {
-        lastPendingCountFetchTime = Date.now();
-        adminApi
-          .listPendingUsers({ limit: 1 })
-          .then((res) => {
-            const count = res.pagination?.total ?? res.users.length;
-            globalPendingCountCache = count;
-            setInternalPendingCount(count);
-          })
-          .catch(() => {});
-      });
-    } catch {
-      // SSE silent catch
-    }
-
-    return () => {
-      es?.close();
-    };
-  }, []);
+    if (!user?.id || user.role !== 'ADMIN' || !user.isActive || user.status !== 'APPROVED') return;
+    const pendingQuery = query(
+      collection(firestoreDb(), 'userProfiles'),
+      where('status', '==', 'PENDING'),
+      limit(1000),
+    );
+    return onSnapshot(pendingQuery, (snapshot) => {
+      const count = snapshot.size;
+      globalPendingCountCache = count;
+      setInternalPendingCount(count);
+    });
+  }, [user?.id, user?.isActive, user?.role, user?.status]);
 
   const displayName = user?.name?.trim() || user?.email?.split('@')[0] || 'Administrator';
   const displayRole = user?.role === 'ADMIN' ? 'System Administrator' : user?.email || 'Administrator';

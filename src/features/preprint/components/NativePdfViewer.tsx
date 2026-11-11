@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import { firebaseAuth } from '@/lib/firebase/client';
+import { fetchPdfFromWorker } from '@/lib/cloudflare/worker-client';
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -15,7 +17,55 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [scale, setScale] = useState<number>(1.0);
   const [containerWidth, setContainerWidth] = useState<number>(850);
+  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    let createdObjectUrl: string | null = null;
+    setPdfObjectUrl(null);
+    setPdfError(null);
+    setPdfLoading(true);
+
+    async function loadPdf() {
+      try {
+        const parsed = new URL(url, window.location.href);
+        const workerBase = process.env.NEXT_PUBLIC_R2_WORKER_URL?.replace(/\/$/, '');
+        let blob: Blob;
+        if (workerBase && parsed.origin === new URL(workerBase).origin && parsed.pathname === '/r2/object') {
+          const key = parsed.searchParams.get('key') || '';
+          const publicationId = parsed.searchParams.get('publicationId') || '';
+          if (!key || !publicationId) throw new Error('PDF link is missing its file reference.');
+          if (firebaseAuth().currentUser) {
+            blob = await fetchPdfFromWorker(key, publicationId);
+          } else {
+            const response = await fetch(parsed.toString(), { cache: 'no-store' });
+            if (!response.ok) throw new Error(`PDF request failed (${response.status}).`);
+            blob = await response.blob();
+          }
+        } else {
+          const response = await fetch(parsed.toString(), { cache: 'no-store' });
+          if (!response.ok) throw new Error(`PDF request failed (${response.status}).`);
+          blob = await response.blob();
+        }
+        createdObjectUrl = URL.createObjectURL(blob);
+        if (active) setPdfObjectUrl(createdObjectUrl);
+        else URL.revokeObjectURL(createdObjectUrl);
+      } catch (error) {
+        if (active) setPdfError(error instanceof Error ? error.message : 'Could not load the PDF.');
+      } finally {
+        if (active) setPdfLoading(false);
+      }
+    }
+
+    void loadPdf();
+    return () => {
+      active = false;
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
+    };
+  }, [url]);
 
   useEffect(() => {
     function updateWidth() {
@@ -105,10 +155,12 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
           {/* Action buttons */}
           <div className="native-pdf-toolbar__actions">
             <a
-              href={url}
+              href={pdfObjectUrl || undefined}
               target="_blank"
               rel="noreferrer"
               className="native-pdf-btn native-pdf-btn--outline"
+              aria-disabled={!pdfObjectUrl}
+              onClick={(event) => { if (!pdfObjectUrl) event.preventDefault(); }}
               title="Mở PDF trong tab mới"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -120,9 +172,11 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
             </a>
 
             <a
-              href={url}
+              href={pdfObjectUrl || undefined}
               download={fileName || 'manuscript.pdf'}
               className="native-pdf-btn native-pdf-btn--primary"
+              aria-disabled={!pdfObjectUrl}
+              onClick={(event) => { if (!pdfObjectUrl) event.preventDefault(); }}
               title="Tải xuống tệp PDF"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -138,8 +192,18 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
 
       {/* Direct Paper Stream on Clean Background */}
       <div className="native-pdf-document-canvas">
+        {pdfLoading ? (
+          <div className="native-pdf-loading">
+            <div className="student-spinner" />
+            <p>Loading PDF…</p>
+          </div>
+        ) : pdfError || !pdfObjectUrl ? (
+          <div className="native-pdf-error">
+            <p>{pdfError || 'Could not load the PDF.'}</p>
+          </div>
+        ) : (
         <Document
-          file={`/api/pdf-proxy?url=${encodeURIComponent(url)}`}
+          file={pdfObjectUrl}
           onLoadSuccess={onDocumentLoadSuccess}
           loading={
             <div className="native-pdf-loading">
@@ -150,7 +214,7 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
           error={
             <div className="native-pdf-error">
               <p>Không thể hiển thị tệp PDF trực tiếp.</p>
-              <a href={url} target="_blank" rel="noreferrer" className="student-btn student-btn--primary">
+              <a href={pdfObjectUrl || undefined} target="_blank" rel="noreferrer" className="student-btn student-btn--primary">
                 Mở / Tải tệp PDF
               </a>
             </div>
@@ -172,6 +236,7 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
               </div>
             ))}
         </Document>
+        )}
       </div>
     </div>
   );

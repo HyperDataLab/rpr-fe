@@ -10,6 +10,7 @@ import { usePreprintList } from '../hooks';
 import { studentPreprintApi } from '../api';
 import type { PreprintVersionInfo } from '../types';
 import { useTranslation } from '@/i18n';
+import { ProtectedPdfDownloadLink } from '../components/ProtectedPdfDownloadLink';
 
 export function StudentVersionArchiveView() {
   const { t, locale } = useTranslation();
@@ -367,10 +368,9 @@ export function StudentVersionArchiveView() {
                                 )}
 
                                 {ver.download_url && (
-                                  <a
-                                    href={ver.download_url}
-                                    target="_blank"
-                                    rel="noreferrer"
+                                  <ProtectedPdfDownloadLink
+                                    url={ver.download_url}
+                                    fileName={ver.file_name}
                                     className="archive-download-btn"
                                   >
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -379,7 +379,7 @@ export function StudentVersionArchiveView() {
                                       <line x1="12" y1="15" x2="12" y2="3" />
                                     </svg>
                                     <span>Tải tệp PDF</span>
-                                  </a>
+                                  </ProtectedPdfDownloadLink>
                                 )}
                               </div>
                             </div>

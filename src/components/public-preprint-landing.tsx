@@ -7,6 +7,7 @@ import { PublicPortalShowcase } from './public-portal-showcase';
 import { ScrollRevealObserver } from './scroll-reveal';
 import { useTranslation } from '@/i18n';
 import { smoothScrollTo } from '@/app/providers/SmoothScrollProvider';
+import { authApi } from '@/features/auth/api/authApi';
 
 // Helper for Vietnamese diacritic removal for live username preview
 const VIETNAMESE_MAP: Record<string, string> = {
@@ -77,18 +78,14 @@ export default function PublicPreprintLanding() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await authApi.register({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           studentId: studentId.trim().toUpperCase(),
           email: email.trim(),
           phone: phone.trim() || undefined,
           major: major.trim(),
-        }),
-      });
+      }).then((data) => new Response(JSON.stringify(data), { status: 201 }));
 
       const data = await res.json();
 

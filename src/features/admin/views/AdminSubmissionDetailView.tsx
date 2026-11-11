@@ -7,6 +7,7 @@ import { AdminShell, AdminPageHeader } from '../components';
 import { DetailSkeleton } from '@/components/skeleton';
 import { SortDropdown } from '@/components/sort-dropdown';
 import { ExpandableAbstract } from '@/shared/components';
+import { ProtectedPdfDownloadLink } from '@/features/preprint/components/ProtectedPdfDownloadLink';
 import {
   adminApi,
   type AdminPublication,
@@ -303,11 +304,11 @@ function VersionList({ versions }: { versions: AdminVersion[] }) {
             </div>
           </div>
           {version.downloadUrl && (
-            <a
-              href={version.downloadUrl}
-              target="_blank"
-              rel="noreferrer"
+            <ProtectedPdfDownloadLink
+              url={version.downloadUrl}
+              fileName={version.fileName}
               className="student-btn student-btn--secondary student-btn--sm"
+              title="Download PDF"
               style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -316,7 +317,7 @@ function VersionList({ versions }: { versions: AdminVersion[] }) {
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
               <span>Download</span>
-            </a>
+            </ProtectedPdfDownloadLink>
           )}
         </div>
       ))}
@@ -843,11 +844,11 @@ export function AdminSubmissionDetailView({ id }: AdminSubmissionDetailViewProps
                     </div>
                   </div>
                 </div>
-                <a
-                  href={publication.downloadUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <ProtectedPdfDownloadLink
+                  url={publication.downloadUrl}
+                  fileName={publication.currentVersion?.fileName || fileNameFromObjectKey(publication.objectKey) || 'manuscript.pdf'}
                   className="student-btn student-btn--primary student-btn--sm"
+                  title="Download PDF"
                   style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -856,7 +857,7 @@ export function AdminSubmissionDetailView({ id }: AdminSubmissionDetailViewProps
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
                   <span>Download PDF</span>
-                </a>
+                </ProtectedPdfDownloadLink>
               </div>
             )}
 

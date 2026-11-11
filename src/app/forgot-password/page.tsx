@@ -4,13 +4,14 @@ import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HyperdataLogo } from '@/components/hyperdata-logo';
+import { authApi } from '@/features/auth/api/authApi';
 import '@/styles/public-landing.css';
 import '@/styles/auth-forms.css';
 
 function ForgotPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialToken = searchParams.get('token') || '';
+  const initialToken = searchParams.get('oobCode') || searchParams.get('token') || '';
 
   // Mode: 'request' (enter email) vs 'reset' (enter new password)
   const [mode, setMode] = useState<'request' | 'reset'>(initialToken ? 'reset' : 'request');
@@ -79,11 +80,10 @@ function ForgotPasswordContent() {
     setRequestLoading(true);
 
     try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: identifier.trim() }),
-      });
+      const res = await authApi.sendPasswordReset(identifier.trim()).then(() => new Response(
+        JSON.stringify({ message: 'Yêu cầu đã được ghi nhận. Vui lòng kiểm tra hộp thư.' }),
+        { status: 200 },
+      ));
 
       const data = await res.json();
       if (!res.ok) {
@@ -129,11 +129,7 @@ function ForgotPasswordContent() {
     setResetLoading(true);
 
     try {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token.trim(), newPassword }),
-      });
+      const res = await authApi.confirmPasswordReset(token.trim(), newPassword).then(() => new Response('{}', { status: 200 }));
 
       const data = await res.json();
       if (!res.ok) {

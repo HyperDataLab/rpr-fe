@@ -1,8 +1,10 @@
 'use client';
 
-import { createContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
 import type { User } from '@/shared/types';
-import { authApi } from '../api/authApi';
+import { authApi, loadUserProfile } from '../api/authApi';
+import { firebaseAuth } from '@/lib/firebase/client';
 
 interface AuthContextType {
   user: User | null;
@@ -24,15 +26,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
-      setUser(await authApi.me());
+      const currentUser = firebaseAuth().currentUser;
+      setUser(currentUser ? await loadUserProfile(currentUser.uid) : null);
     } catch {
       setUser(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const updateUser = (updated: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...updated } : null));
@@ -44,7 +47,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    void refresh();
+    try {
+      return onAuthStateChanged(firebaseAuth(), async (firebaseUser) => {
+        if (!firebaseUser) {
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        try {
+          setUser(await loadUserProfile(firebaseUser.uid));
+        } catch {
+          setUser(null);
+        } finally {
+          setLoading(false);
+        }
+      });
+    } catch {
+      setUser(null);
+      setLoading(false);
+    }
   }, []);
 
   return (

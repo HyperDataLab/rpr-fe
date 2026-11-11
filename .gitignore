@@ -3,6 +3,7 @@ node_modules/
 
 # Next.js generated output
 .next/
+.next-dev/
 out/
 dist/
 coverage/
@@ -12,6 +13,9 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Firebase Admin service-account private keys
+*firebase-adminsdk-*.json
 
 # Logs
 *.log

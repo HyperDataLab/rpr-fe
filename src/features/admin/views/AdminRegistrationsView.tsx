@@ -1,11 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { Button } from '@hyperdata/design-system';
 import { AdminPageHeader, AdminShell } from '../components';
 import { adminApi, type AdminUser } from '../api';
 import { TableSkeleton } from '@/components/skeleton';
 import { useTranslation } from '@/i18n';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { firestoreDb } from '@/lib/firebase/client';
+
+function timestampIso(value: unknown) {
+  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    return (value.toDate as () => Date)().toISOString();
+  }
+  return value instanceof Date ? value.toISOString() : typeof value === 'string' ? value : '';
+}
 
 function getUserInitials(name?: string | null, email?: string): string {
   if (name?.trim()) {
@@ -23,6 +33,7 @@ function getUserInitials(name?: string | null, email?: string): string {
 
 export function AdminRegistrationsView() {
   const { t, locale } = useTranslation();
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 
@@ -33,6 +44,7 @@ export function AdminRegistrationsView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const previousPendingIds = useRef<Set<string> | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean;
@@ -46,66 +58,62 @@ export function AdminRegistrationsView() {
 
   const PAGE_SIZE = 10;
 
-  const refreshPending = (targetPage = page) => {
+  useEffect(() => {
+    if (!user?.id || user.role !== 'ADMIN' || !user.isActive || user.status !== 'APPROVED') {
+      setPendingUsers([]);
+      setPagination({ page: 1, totalPages: 1, total: 0 });
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    adminApi
-      .listPendingUsers({ page: targetPage, limit: PAGE_SIZE })
-      .then((next) => {
-        setPendingUsers(next.users);
-        setPagination(next.pagination);
-        if (next.users.length === 0 && targetPage > 1) {
-          setPage(targetPage - 1);
-        }
-      })
-      .catch((reason: unknown) => {
-        setPendingUsers([]);
-        setPagination(null);
-        setError(reason instanceof Error ? reason.message : 'Unable to load pending registrations.');
-      })
-      .finally(() => setLoading(false));
-  };
+    const pendingQuery = query(
+      collection(firestoreDb(), 'userProfiles'),
+      where('status', '==', 'PENDING'),
+      limit(1000),
+    );
+    return onSnapshot(pendingQuery, (snapshot) => {
+      const allUsers = snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          email: String(data.email || ''),
+          username: typeof data.username === 'string' ? data.username : null,
+          name: typeof data.name === 'string' ? data.name : [data.firstName, data.lastName].filter((part) => typeof part === 'string' && part).join(' ') || null,
+          phone: typeof data.phone === 'string' ? data.phone : null,
+          studentId: typeof data.studentId === 'string' ? data.studentId : null,
+          major: typeof data.major === 'string' ? data.major : null,
+          avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : null,
+          role: data.role === 'LECTURER' || data.role === 'ADMIN' ? data.role : 'STUDENT',
+          isActive: data.isActive === true,
+          status: data.status === 'APPROVED' || data.status === 'REJECTED' || data.status === 'SUSPENDED' || data.status === 'PENDING' ? data.status : 'PENDING',
+          mustChangePassword: data.mustChangePassword === true,
+          lastLoginAt: timestampIso(data.lastLoginAt) || null,
+          createdAt: timestampIso(data.createdAt),
+          updatedAt: timestampIso(data.updatedAt),
+        } satisfies AdminUser;
+      }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  useEffect(() => {
-    refreshPending(page);
-  }, [page]);
-
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let retry: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-
-    const connect = () => {
-      es = new EventSource('/api/admin/registrations/stream');
-      es.addEventListener('registration:new', () => {
-        refreshPending(page);
+      const currentIds = new Set(allUsers.map((item) => item.id));
+      const previousIds = previousPendingIds.current;
+      if (previousIds && [...currentIds].some((id) => !previousIds.has(id))) {
         setMessage(locale === 'vi' ? 'Có đăng ký mới chờ duyệt.' : 'A new registration is awaiting review.');
-      });
-      es.onerror = () => {
-        if (closed) return;
-        if (es && es.readyState === EventSource.CLOSED) {
-          retry = setTimeout(connect, 3000);
-        }
-      };
-    };
-    connect();
-
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshPending(page);
-        const dead = !es || es.readyState === EventSource.CLOSED;
-        if (dead && !retry) connect();
       }
-    };
-    document.addEventListener('visibilitychange', onVisibility);
+      previousPendingIds.current = currentIds;
 
-    return () => {
-      closed = true;
-      document.removeEventListener('visibilitychange', onVisibility);
-      if (retry) clearTimeout(retry);
-      es?.close();
-    };
-  }, [page]);
-
+      const totalPages = Math.ceil(allUsers.length / PAGE_SIZE) || 1;
+      const activePage = Math.min(page, totalPages);
+      setPagination({ page: activePage, totalPages, total: allUsers.length });
+      if (activePage !== page) setPage(activePage);
+      const start = (activePage - 1) * PAGE_SIZE;
+      setPendingUsers(allUsers.slice(start, start + PAGE_SIZE));
+      setError(null);
+      setLoading(false);
+    }, (reason) => {
+      setError(reason.message || 'Unable to listen for pending registrations.');
+      setLoading(false);
+    });
+  }, [locale, page, user?.id, user?.isActive, user?.role, user?.status]);
   const filteredPendingUsers = useMemo(() => {
     if (!search.trim()) return pendingUsers;
     const q = search.toLowerCase().trim();
@@ -137,7 +145,6 @@ export function AdminRegistrationsView() {
         setError(null);
         try {
           await (decision === 'approve' ? adminApi.approveUser(user.id) : adminApi.rejectUser(user.id));
-          refreshPending(page);
           setMessage(
             decision === 'approve'
               ? (locale === 'vi' ? `Đã duyệt đăng ký cho ${user.name || user.email}. Thông tin đăng nhập tạm thời đã được gửi.` : `Approved registration for ${user.name || user.email}. Temporary credentials issued.`)

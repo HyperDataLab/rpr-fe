@@ -1,8 +1,5 @@
-import { requireAreaAccess } from '../../lib/route-guards';
+import { AreaAccessGuard } from '@/features/auth/components/AreaAccessGuard';
 
-export const dynamic = 'force-dynamic';
-
-export default async function LecturerLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  await requireAreaAccess('lecturer');
-  return children;
+export default function LecturerLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <AreaAccessGuard area="lecturer">{children}</AreaAccessGuard>;
 }

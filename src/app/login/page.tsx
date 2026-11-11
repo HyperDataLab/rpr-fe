@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HyperdataLogo } from '@/components/hyperdata-logo';
+import { authApi } from '@/features/auth/api/authApi';
 import '@/styles/public-landing.css';
 import '@/styles/auth-forms.css';
 
@@ -26,14 +27,8 @@ function LoginForm() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier, password }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
+      const data = await authApi.login(identifier, password);
+      if (!data.success || !data.user) {
         setError(data.error || 'Đăng nhập không thành công. Vui lòng kiểm tra lại thông tin.');
         setLoading(false);
         return;
@@ -60,14 +55,8 @@ function LoginForm() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: email, password: 'Password@123' }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
+      const data = await authApi.login(email, 'Password@123');
+      if (!data.success || !data.user) {
         setError(data.error || 'Đăng nhập không thành công.');
         setLoading(false);
         setQuickLoadingRole(null);

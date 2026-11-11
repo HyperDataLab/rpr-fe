@@ -57,7 +57,7 @@ const faqs = [
   {
     question: 'Who can submit a manuscript to HyperData Lab?',
     answer:
-      'Undergraduate and graduate students, academic research assistants, and university faculty collaborators can submit work through the HyperData Lab workspace. Authentication is centrally managed through Single Sign-On (SSO).',
+      'Undergraduate and graduate students, academic research assistants, and university faculty collaborators can submit work through the HyperData Lab workspace using an approved account and institutional email.',
   },
   {
     question: 'Can I update my manuscript after receiving reviewer feedback?',
@@ -348,7 +348,7 @@ export function PaperLandingView() {
               </a>
             </div>
             <small className="paper-cta-footnote">
-              Single Sign-On (SSO) supported • Institutional email registration available
+              Sign in with your approved account • Institutional email registration available
             </small>
           </div>
         </section>
