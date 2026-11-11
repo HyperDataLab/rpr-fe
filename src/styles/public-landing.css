@@ -140,6 +140,7 @@ body:has(.public-landing) {
 }
 
 .pl-skip-link {
+  display: none;
   position: fixed;
   top: 12px;
   left: 12px;
@@ -255,6 +256,64 @@ body:has(.public-landing) {
   justify-self: center;
 }
 
+.pl-tools-menu {
+  position: relative;
+}
+
+.pl-tools-menu__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pl-tools-menu__toggle svg {
+  transition: transform 180ms ease;
+}
+
+.pl-tools-menu__toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.pl-tools-menu__panel {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+  z-index: 70;
+  display: grid;
+  width: max-content;
+  min-width: 230px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 14px 30px rgba(18, 35, 49, .14);
+}
+
+.pl-tools-menu__item {
+  padding: 11px 12px;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  transition: color var(--ds-duration-quick) var(--ds-ease-out),
+    background-color var(--ds-duration-quick) var(--ds-ease-out);
+}
+
+.pl-tools-menu__item:hover,
+.pl-tools-menu__item:focus-visible {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  outline: none;
+}
+
 .pl-mobile-nav {
   position: relative;
   display: none;
@@ -332,6 +391,23 @@ body:has(.public-landing) {
 .pl-mobile-nav__link:hover {
   color: var(--color-primary);
   background: var(--color-primary-soft);
+}
+
+.pl-mobile-nav__tools {
+  display: grid;
+  gap: 2px;
+  margin-top: 5px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.pl-mobile-nav__tools-title {
+  padding: 8px 16px 2px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 
 /* Right-to-left underline reveal links (Section 5.6) */
