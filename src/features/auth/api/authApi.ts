@@ -77,7 +77,7 @@ export const authApi = {
     }
   },
 
-  async loginWithWorkspace(): Promise<{ success: boolean; user?: User; error?: string }> {
+  async loginWithWorkspace(ssoRequestId?: string): Promise<{ success: boolean; user?: User; error?: string; ssoRedirectUrl?: string }> {
     const auth = firebaseAuth();
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({
@@ -114,6 +114,24 @@ export const authApi = {
       if (user.workspaceEmail.toLowerCase() !== googleCredential.user.email?.toLowerCase()) {
         await signOut(auth);
         return { success: false, error: 'Email Google đăng nhập không khớp email Workspace đã được cấp.' };
+      }
+      if (ssoRequestId) {
+        const completeResponse = await fetch(`${workerUrl.replace(/\/$/, '')}/api/sso/authorize/complete`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${await credential.user.getIdToken()}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ requestId: ssoRequestId }),
+          cache: 'no-store',
+        });
+        const completed = await completeResponse.json().catch(() => null) as {
+          data?: { redirectUrl?: string }; error?: { message?: string };
+        } | null;
+        if (!completeResponse.ok || !completed?.data?.redirectUrl) {
+          throw new Error(completed?.error?.message || 'Could not complete the external sign-in request.');
+        }
+        return { success: true, user, ssoRedirectUrl: completed.data.redirectUrl };
       }
       return { success: true, user };
     } catch (error) {

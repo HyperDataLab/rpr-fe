@@ -15,6 +15,7 @@ export const ROUTES = {
     SUBMISSION_DETAIL: (id: string | number) => `/admin/submissions/${id}`,
     REVIEWS: '/admin/reviews',
     USERS: '/admin/users',
+    SSO: '/admin/sso',
     REGISTRATIONS: '/admin/registrations',
     PROFILE: '/admin/profile',
   },

@@ -6,7 +6,7 @@
 .admin-frame {
   display: grid;
   min-height: 100dvh;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   grid-template-rows: 1fr;
   background: var(--hd-bg);
   font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -15,6 +15,8 @@
 /* Sidebar stays fully fixed within the grid column */
 .admin-frame .student-sidebar {
   position: sticky;
+  width: 240px;
+  min-width: 240px;
   top: 0;
   height: 100vh;
   overflow-y: auto;
@@ -2893,6 +2895,62 @@
   line-height: 1.5;
 }
 
+.workspace-sso-admin { margin-top: 20px; }
+.workspace-sso-admin__form { margin: 18px 0; padding: 18px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+.workspace-sso-admin__form-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(220px, .8fr); gap: 14px; align-items: end; }
+.workspace-sso-admin__form-grid > label { display: grid; gap: 6px; color: #334155; font-size: 12px; font-weight: 650; }
+.workspace-sso-admin__form-grid input, .workspace-sso-admin__form-grid textarea, .workspace-sso-admin__credentials input { width: 100%; min-width: 0; min-height: 42px; box-sizing: border-box; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #0f172a; font: inherit; font-weight: 450; }
+.workspace-sso-admin__client-type-field { position: relative; display: grid; min-width: 0; gap: 6px; color: #334155; font-size: 12px; font-weight: 650; }
+.workspace-sso-admin__client-type-trigger { display: flex; width: 100%; min-width: 0; min-height: 42px; align-items: center; justify-content: space-between; gap: 12px; box-sizing: border-box; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #0f172a; font: inherit; font-size: 13px; font-weight: 450; text-align: left; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+.workspace-sso-admin__client-type-trigger:hover { border-color: #94a3b8; }
+.workspace-sso-admin__client-type-trigger:focus-visible,
+.workspace-sso-admin__client-type-trigger[aria-expanded="true"] { border-color: #0284c7; outline: none; box-shadow: 0 0 0 3px rgb(2 132 199 / 14%); }
+.workspace-sso-admin__client-type-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-sso-admin__client-type-trigger svg { width: 12px; height: 8px; flex: 0 0 auto; fill: none; stroke: #64748b; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; transition: transform .15s ease; }
+.workspace-sso-admin__client-type-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
+.workspace-sso-admin__client-type-menu { position: absolute; z-index: 50; top: calc(100% + 5px); right: 0; left: 0; padding: 5px; border: 1px solid #d7e0e8; border-radius: 8px; background: #fff; box-shadow: 0 10px 24px rgb(15 23 42 / 12%), 0 3px 8px rgb(15 23 42 / 6%); }
+.workspace-sso-admin__client-type-option { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 5px; color: #334155; font-size: 13px; font-weight: 450; cursor: pointer; transition: background-color .12s ease, color .12s ease; }
+.workspace-sso-admin__client-type-option:hover,
+.workspace-sso-admin__client-type-option.is-active { background: #f0f7ff; color: #075985; }
+.workspace-sso-admin__client-type-option.is-selected { font-weight: 600; }
+.workspace-sso-admin__client-type-option svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: #0284c7; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.workspace-sso-admin__form-grid textarea { resize: vertical; }
+.workspace-sso-admin__wide { grid-column: 1 / -1; }
+.workspace-sso-admin__scope-note { display: grid; gap: 4px; padding: 10px 12px; border-radius: 7px; background: #eff6ff; color: #334155; font-size: 12px; }
+.workspace-sso-admin__scope-note span { color: #64748b; }
+.workspace-sso-admin__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.workspace-sso-admin__client { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 16px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
+.workspace-sso-admin__client-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.workspace-sso-admin__client h3 { margin: 0 0 5px; color: #0f172a; font-size: 15px; }
+.workspace-sso-admin__client code, .workspace-sso-admin__redirects code, .workspace-sso-admin__endpoints code { overflow-wrap: anywhere; color: #52677b; font-size: 11px; }
+.workspace-sso-admin__client > p { margin: 0; color: #64748b; font-size: 12px; }
+.workspace-sso-admin__client-meta { display: flex; flex-wrap: wrap; gap: 6px; color: #64748b; font-size: 11px; }
+.workspace-sso-admin__client-meta span { padding: 4px 7px; border-radius: 5px; background: #f1f5f9; }
+.workspace-sso-admin__redirects { display: grid; gap: 5px; min-width: 0; }
+.workspace-sso-admin__redirects strong { color: #475569; font-size: 11px; }
+.workspace-sso-admin__client-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.workspace-sso-admin__delete-dialog { width: min(100% - 32px, 440px); max-width: 440px; padding: 0; overflow: visible; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; color: #0f172a; box-shadow: 0 24px 60px rgb(15 23 42 / 22%), 0 6px 18px rgb(15 23 42 / 10%); }
+.workspace-sso-admin__delete-dialog::backdrop { background: rgb(15 23 42 / 48%); backdrop-filter: blur(2px); }
+.workspace-sso-admin__delete-content { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 14px; padding: 22px; }
+.workspace-sso-admin__delete-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: #fff7ed; color: #c2410c; }
+.workspace-sso-admin__delete-icon svg { width: 22px; height: 22px; }
+.workspace-sso-admin__delete-copy h2 { margin: 2px 0 7px; color: #0f172a; font-size: 16px; line-height: 1.35; }
+.workspace-sso-admin__delete-copy p { margin: 0; color: #52677b; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.workspace-sso-admin__delete-copy strong { color: #243b53; }
+.workspace-sso-admin__delete-actions { display: flex; grid-column: 1 / -1; justify-content: flex-end; gap: 9px; margin-top: 5px; }
+.workspace-sso-admin__delete-dialog[open] { animation: workspaceSsoDialogIn 150ms ease-out; }
+@keyframes workspaceSsoDialogIn { from { opacity: 0; transform: translateY(5px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.workspace-sso-admin__credentials { display: grid; gap: 10px; margin: 14px 0; padding: 14px; border: 1px solid #a7f3d0; border-radius: 8px; background: #f0fdf4; }
+.workspace-sso-admin__credentials > div { display: grid; gap: 3px; }
+.workspace-sso-admin__credentials strong { color: #166534; font-size: 14px; }
+.workspace-sso-admin__credentials span { color: #64748b; font-size: 12px; }
+.workspace-sso-admin__credentials label { display: grid; gap: 5px; color: #334155; font-size: 11px; font-weight: 650; }
+.workspace-sso-admin__notice { margin: 12px 0; padding: 10px 12px; border: 1px solid #bbf7d0; border-radius: 7px; background: #f0fdf4; color: #166534; font-size: 12px; }
+.workspace-sso-admin__endpoints { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 14px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 11px; }
+.workspace-sso-admin__endpoints strong { color: #475569; }
+@media (max-width: 720px) { .workspace-sso-admin__form-grid { grid-template-columns: 1fr; } .workspace-sso-admin__wide { grid-column: auto; } }
+@media (prefers-reduced-motion: reduce) { .workspace-sso-admin__delete-dialog[open] { animation: none; } }
+
 @media (max-width: 1100px) {
   .workspace-admin__form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5008,7 +5066,8 @@
     top: 0;
     left: 0;
     bottom: 0;
-    width: 270px;
+    width: 250px;
+    min-width: 250px;
     z-index: 100;
     transform: translateX(-100%);
     box-shadow: 0 0 25px rgba(0, 0, 0, 0.15);

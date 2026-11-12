@@ -174,17 +174,15 @@ interface PreprintEditorViewProps {
 function PreprintWorkspaceShell({
   isLecturer,
   title,
-  kicker,
   children,
 }: {
   isLecturer: boolean;
   title: string;
-  kicker: string;
   children: React.ReactNode;
 }) {
   return isLecturer
     ? <LecturerShell active="submissions" title={title}>{children}</LecturerShell>
-    : <StudentShell title={title} kicker={kicker}>{children}</StudentShell>;
+    : <StudentShell title={title}>{children}</StudentShell>;
 }
 
 export function PreprintEditorView({ id }: PreprintEditorViewProps) {
@@ -740,7 +738,6 @@ export function PreprintEditorView({ id }: PreprintEditorViewProps) {
                 ? t('student.preprints.editDraft')
                 : t('student.topbar.newPreprintButton')
       }
-      kicker={isReadOnly ? t('student.preprints.submittedManuscript') : isPublished ? 'CẬP NHẬT BÀI BÁO' : isRevisionMode ? t('student.preprints.submitRevision') : t('student.preprints.registerManuscript')}
     >
       {loadingInitial ? (
         <FormSkeleton />

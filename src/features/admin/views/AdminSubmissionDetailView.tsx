@@ -772,7 +772,6 @@ export function AdminSubmissionDetailView({ id }: AdminSubmissionDetailViewProps
   return (
     <AdminShell active="submissions" title="Submission detail">
       <AdminPageHeader
-        eyebrow="Editorial record"
         title={publication?.title || 'Submission detail'}
         description="Read the manuscript record, monitor peer review progress, and exercise administrative backup controls when required."
       />

@@ -154,7 +154,6 @@ export function AdminReviewsView() {
   return (
     <AdminShell active="reviews" title={t('admin.reviews')} pendingCount={metrics.pending}>
       <AdminPageHeader
-        eyebrow={t('admin.reviewsEyebrow')}
         title={t('admin.reviewsTitle')}
         description={t('admin.reviewsDesc')}
         actions={

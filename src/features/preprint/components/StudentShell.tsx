@@ -6,7 +6,6 @@ import { StudentDashboardLayout } from './StudentDashboardLayout';
 
 interface StudentShellProps {
   title?: string;
-  kicker?: string;
   actions?: ReactNode;
   breadcrumbs?: Array<{ label: string; href?: string }>;
   showStandardHeader?: boolean;
@@ -15,7 +14,6 @@ interface StudentShellProps {
 
 export function StudentShell({
   title,
-  kicker,
   actions,
   breadcrumbs,
   showStandardHeader = false,
@@ -45,7 +43,6 @@ export function StudentShell({
       {showStandardHeader && title && (
         <div className="student-view-header">
           <div>
-            {kicker && <span className="student-kicker">{kicker}</span>}
             <h1 className="student-page-title">{title}</h1>
           </div>
           {actions && <div className="student-view-actions">{actions}</div>}

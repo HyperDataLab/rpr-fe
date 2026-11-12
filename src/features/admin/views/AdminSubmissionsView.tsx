@@ -258,7 +258,6 @@ export function AdminSubmissionsView() {
   return (
     <AdminShell active="submissions" title="Submissions" pendingCount={displayMetrics.underReview}>
       <AdminPageHeader
-        eyebrow={t('admin.editorialWorkspace')}
         title={t('admin.submissionsManagement')}
         description={t('admin.submissionsDesc')}
       />

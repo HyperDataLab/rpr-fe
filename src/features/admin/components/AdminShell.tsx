@@ -13,7 +13,7 @@ import { useTranslation } from '@/i18n';
 import { NotificationBell } from '@/shared/components/NotificationBell';
 import { firestoreDb } from '@/lib/firebase/client';
 
-export type AdminNavKey = 'dashboard' | 'submissions' | 'reviews' | 'users' | 'registrations' | 'profile';
+export type AdminNavKey = 'dashboard' | 'submissions' | 'reviews' | 'users' | 'sso' | 'registrations' | 'profile';
 
 export interface AdminShellProps {
   active: AdminNavKey;
@@ -131,7 +131,7 @@ export function AdminSidebar({
                 <line x1="10" x2="8" y1="9" y2="9" />
               </svg>
             </span>
-            <span className="student-sidebar__text">{t('admin.submissions')}</span>
+            <span className="student-sidebar__text">{t('admin.navSubmissions')}</span>
             {pendingCount !== undefined && pendingCount > 0 && (
               <span style={{ marginLeft: 'auto', fontSize: '12.5px', fontWeight: 700, color: '#0071bc' }}>
                 {pendingCount}
@@ -151,7 +151,7 @@ export function AdminSidebar({
                 <path d="m9 9 2 2 4-4" />
               </svg>
             </span>
-            <span className="student-sidebar__text">{t('admin.reviews')}</span>
+            <span className="student-sidebar__text">{t('admin.navReviews')}</span>
           </Link>
         </div>
 
@@ -171,7 +171,22 @@ export function AdminSidebar({
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
             </span>
-            <span className="student-sidebar__text">{t('admin.accountManagement')}</span>
+            <span className="student-sidebar__text">{t('admin.navAccounts')}</span>
+          </Link>
+
+          <Link
+            href={ROUTES.ADMIN.SSO}
+            className={`student-sidebar__link ${active === 'sso' ? 'student-sidebar__link--active' : ''}`}
+            onClick={onClose}
+          >
+            <span className="student-sidebar__icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 7h9m4 0h3M4 17h3m4 0h9" />
+                <circle cx="15" cy="7" r="2" />
+                <circle cx="9" cy="17" r="2" />
+              </svg>
+            </span>
+            <span className="student-sidebar__text">{t('admin.navSso')}</span>
           </Link>
 
           <Link
@@ -187,7 +202,7 @@ export function AdminSidebar({
                 <line x1="22" y1="11" x2="16" y2="11" />
               </svg>
             </span>
-            <span className="student-sidebar__text">{t('admin.registrationRequests')}</span>
+            <span className="student-sidebar__text">{t('admin.navRegistrations')}</span>
             {internalPendingCount !== undefined && internalPendingCount > 0 && (
               <span
                 style={{
@@ -218,7 +233,7 @@ export function AdminSidebar({
                 <circle cx="12" cy="7" r="4" />
               </svg>
             </span>
-            <span className="student-sidebar__text">{t('common.profile')}</span>
+            <span className="student-sidebar__text">{t('admin.navProfile')}</span>
           </Link>
         </div>
       </nav>
