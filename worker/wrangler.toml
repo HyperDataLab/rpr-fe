@@ -7,7 +7,7 @@ GROBID_ORIGIN = "https://grobid.hyperdatalab.org"
 FIREBASE_PROJECT_ID = "hyperdatalab-27172"
 FRONTEND_ORIGINS = "https://hyperdatalab.org,http://localhost:3003,http://localhost:3000,http://100.115.150.106:3003"
 ALLOWED_ORIGINS = "http://localhost:3003,http://localhost:3000,http://100.115.150.106:3003,https://hyperdatalab.org"
-FRONTEND_URL = "http://localhost:3003"
+FRONTEND_URL = "https://hyperdatalab.org"
 WORKSPACE_DELETE_ENABLED = "false"
 
 GOOGLE_CLIENT_ID = "197071469592-gev2eoitvvq056oersbvgdp1hobfrro1.apps.googleusercontent.com"

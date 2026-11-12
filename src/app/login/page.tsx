@@ -11,6 +11,7 @@ import '@/styles/auth-forms.css';
 function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = searchParams.get('next') || '/student/my-preprints';
+  const ssoRequestId = searchParams.get('sso_request') || undefined;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,13 +19,14 @@ function LoginForm() {
     setError(null);
     setLoading(true);
     try {
-      const data = await authApi.loginWithWorkspace();
+      const data = await authApi.loginWithWorkspace(ssoRequestId);
       if (!data.success || !data.user) {
         setError(data.error || 'Google Workspace sign-in failed.');
         setLoading(false);
         return;
       }
-      if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
+      if (data.ssoRedirectUrl) window.location.assign(data.ssoRedirectUrl);
+      else if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
       else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
       else window.location.href = nextPath;
     } catch (reason) {

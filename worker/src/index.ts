@@ -316,9 +316,36 @@ async function canReadPublicationDetails(
   return false;
 }
 
-function corsHeaders(request: Request, env: Env) {
+const ssoBrowserCorsPaths = new Set(['/oauth/token', '/oauth/userinfo', '/oauth/revoke']);
+
+async function isRegisteredPublicSsoOrigin(origin: string, env: Env): Promise<boolean> {
+  if (!origin || !env.DB) return false;
+  try {
+    const result = await env.DB.prepare("SELECT redirect_uris_json FROM sso_clients WHERE client_type = 'PUBLIC' AND is_active = 1").all<{ redirect_uris_json: string }>();
+    return (result.results || []).some((client) => {
+      try {
+        const redirectUris = JSON.parse(client.redirect_uris_json) as unknown;
+        return Array.isArray(redirectUris) && redirectUris.some((redirectUri) => {
+          if (typeof redirectUri !== 'string') return false;
+          return new URL(redirectUri).origin === origin;
+        });
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    // A missing migration or unavailable D1 binding must never widen browser access.
+    return false;
+  }
+}
+
+export async function corsHeaders(request: Request, env: Env) {
   const origin = request.headers.get('origin') || '';
   const allow = (env.ALLOWED_ORIGINS || env.FRONTEND_ORIGINS).split(',').map((item) => item.trim()).filter(Boolean);
+  const url = new URL(request.url);
+  const isConfiguredOrigin = allow.includes(origin);
+  const isRegisteredSsoOrigin = !isConfiguredOrigin && ssoBrowserCorsPaths.has(url.pathname)
+    && await isRegisteredPublicSsoOrigin(origin, env);
   const headers = new Headers({
     'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'access-control-allow-headers': 'authorization, content-type, range, if-range',
@@ -326,13 +353,13 @@ function corsHeaders(request: Request, env: Env) {
     'access-control-max-age': '86400',
     vary: 'Origin',
   });
-  if (allow.includes(origin)) headers.set('access-control-allow-origin', origin);
+  if (isConfiguredOrigin || isRegisteredSsoOrigin) headers.set('access-control-allow-origin', origin);
   return headers;
 }
 
-function withCors(response: Response, request: Request, env: Env) {
+async function withCors(response: Response, request: Request, env: Env) {
   const headers = new Headers(response.headers);
-  corsHeaders(request, env).forEach((value, key) => headers.set(key, value));
+  (await corsHeaders(request, env)).forEach((value, key) => headers.set(key, value));
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -475,13 +502,16 @@ async function handleGrobid(request: Request, env: Env) {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const cors = corsHeaders(request, env);
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: await corsHeaders(request, env) });
     if (url.pathname === '/health' && request.method === 'GET') {
       return withCors(json({ ok: true, service: 'rpr-data-worker' }), request, env);
     }
 
     try {
+      if (url.pathname.startsWith('/oauth/')) {
+        const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
+        if (workspaceResponse) return withCors(workspaceResponse, request, env);
+      }
       if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST') {
         const token = decodeFirestoreBearer(request);
         let claims: FirebaseClaims;
@@ -496,7 +526,7 @@ export default {
         }, token);
         if (workspaceResponse) return withCors(workspaceResponse, request, env);
       }
-      if (url.pathname.startsWith('/auth/google/') || url.pathname.startsWith('/auth/workspace/') || url.pathname.startsWith('/api/workspace/')) {
+      if (url.pathname.startsWith('/auth/google/') || url.pathname.startsWith('/auth/workspace/') || url.pathname.startsWith('/api/workspace/') || url.pathname.startsWith('/api/sso/')) {
         if (url.pathname === '/auth/google/callback' && request.method === 'GET') {
           const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
           if (workspaceResponse) return withCors(workspaceResponse, request, env);
@@ -509,8 +539,10 @@ export default {
         } catch (error) {
           const status = error instanceof Response ? error.status : 503;
           const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'WORKSPACE_PERMISSION_DENIED' : 'IDENTITY_PROVIDER_UNAVAILABLE';
+          const isSsoEndpoint = url.pathname.startsWith('/api/sso/');
           const message = status === 401 ? 'Firebase authentication is required.'
-            : status === 403 ? 'An active administrator account is required.' : 'Could not validate the application administrator.';
+            : status === 403 ? (isSsoEndpoint ? 'An approved active application profile is required.' : 'An active administrator account is required.')
+              : 'Could not validate the application identity.';
           return withCors(json({ success: false, error: { code, message, details: null } }, status), request, env);
         }
         const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv, {

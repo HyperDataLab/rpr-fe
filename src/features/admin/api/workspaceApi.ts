@@ -23,6 +23,18 @@ export interface WorkspaceConnectionStatus {
   deleteEnabled: boolean;
 }
 
+export interface SsoClient {
+  clientId: string;
+  name: string;
+  description: string | null;
+  clientType: 'PUBLIC' | 'CONFIDENTIAL';
+  redirectUris: string[];
+  allowedScopes: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface ApiEnvelope<T> { success: true; data: T; message: string }
 interface WorkspaceUsersPage { users: WorkspaceUser[]; nextPageToken: string | null; pageSize: number; total: number | null; etag: string | null }
 type WorkspaceUserPatch = Partial<Pick<WorkspaceUser['name'], 'givenName' | 'familyName'>> & Pick<Partial<WorkspaceUser>, 'orgUnitPath' | 'recoveryEmail' | 'recoveryPhone'>;
@@ -92,4 +104,26 @@ export async function restoreWorkspaceUser(id: string) {
 
 export async function deleteWorkspaceUser(id: string, confirmEmail: string) {
   return unwrap(await workerRequest<ApiEnvelope<null>>(`/api/workspace/users/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmEmail }) }));
+}
+
+export async function listSsoClients() {
+  return unwrap(await workerRequest<ApiEnvelope<{ clients: SsoClient[] }>>('/api/sso/clients'));
+}
+
+export async function createSsoClient(payload: { name: string; description?: string; redirectUris: string[]; clientType: SsoClient['clientType']; allowedScopes: string[] }) {
+  return unwrap(await workerRequest<ApiEnvelope<{ client: SsoClient & { clientSecret: string | null } }>>('/api/sso/clients', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  }));
+}
+
+export async function setSsoClientActive(clientId: string, isActive: boolean) {
+  return unwrap(await workerRequest<ApiEnvelope<{ clientId: string; isActive: boolean }>>(`/api/sso/clients/${encodeURIComponent(clientId)}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isActive }),
+  }));
+}
+
+export async function deleteSsoClient(clientId: string) {
+  return unwrap(await workerRequest<ApiEnvelope<{ clientId: string; deleted: boolean }>>(`/api/sso/clients/${encodeURIComponent(clientId)}`, {
+    method: 'DELETE',
+  }));
 }

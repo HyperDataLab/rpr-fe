@@ -17,6 +17,7 @@ class TestStatement implements D1Statement {
   async all<T = Record<string, unknown>>(): Promise<D1Result<T>> { return { success: true, results: [] }; }
   async first<T = Record<string, unknown>>(): Promise<T | null> {
     if (this.sql.includes('SELECT request_count')) return { request_count: 1 } as T;
+    if (this.sql.includes('SELECT name FROM sso_clients')) return { name: 'Test client' } as T;
     if (this.sql.includes('SELECT * FROM google_oauth_connections')) return this.db.connection as T | null;
     if (this.sql.includes('SELECT * FROM oauth_transactions')) {
       const [id, stateHash] = this.values;
@@ -56,6 +57,50 @@ const admin = { uid: 'firebase-admin', role: 'ADMIN' as const };
 const student = { uid: 'firebase-student', role: 'STUDENT' as const };
 
 describe('Workspace API authorization and validation', () => {
+  it('rejects malformed SSO authorization requests before creating a login request', async () => {
+    const { env } = await testEnv();
+    const result = await handleWorkspaceRequest(new Request('https://worker.test/oauth/authorize?response_type=code'), env);
+    expect(result?.status).toBe(400);
+    expect(await result?.json()).toMatchObject({ success: false, error: { code: 'INVALID_AUTHORIZATION_REQUEST' } });
+  });
+
+  it('restricts SSO client management to administrators', async () => {
+    const { env } = await testEnv();
+    const result = await handleWorkspaceRequest(new Request('https://worker.test/api/sso/clients', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Client' }),
+    }), env, student);
+    expect(result?.status).toBe(403);
+    expect(await result?.json()).toMatchObject({ success: false, error: { code: 'WORKSPACE_PERMISSION_DENIED' } });
+  });
+
+  it('routes DELETE requests for SSO clients to client deletion', async () => {
+    const { env } = await testEnv();
+    const clientId = `hd_${'a'.repeat(24)}`;
+    const result = await handleWorkspaceRequest(new Request(`https://worker.test/api/sso/clients/${clientId}`, { method: 'DELETE' }), env, admin);
+    expect(result?.status).toBe(200);
+    expect(await result?.json()).toMatchObject({ success: true, data: { clientId, deleted: true } });
+  });
+
+  it('does not complete SSO for a pending application profile', async () => {
+    const { env } = await testEnv();
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ fields: {
+      workspaceEmail: { stringValue: 'student@example.org' }, status: { stringValue: 'PENDING' },
+      isActive: { booleanValue: true }, role: { stringValue: 'STUDENT' },
+    } })));
+    const result = await handleWorkspaceRequest(new Request('https://worker.test/api/sso/authorize/complete', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'A'.repeat(24) }),
+    }), env, student, 'firebase-id-token');
+    expect(result?.status).toBe(403);
+    expect(await result?.json()).toMatchObject({ success: false, error: { code: 'PROFILE_NOT_APPROVED' } });
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects unknown SSO OAuth endpoints instead of falling through to the app API', async () => {
+    const { env } = await testEnv();
+    const result = await handleWorkspaceRequest(new Request('https://worker.test/oauth/unknown'), env);
+    expect(result?.status).toBe(404);
+  });
+
   it('rejects non-admin users before Google API calls', async () => {
     const { env } = await testEnv();
     const result = await handleWorkspaceRequest(new Request('https://worker.test/api/workspace/users', { method: 'POST', body: '{}' }), env, student);
@@ -72,7 +117,7 @@ describe('Workspace API authorization and validation', () => {
     expect(await result?.json()).toMatchObject({ success: false, error: { code: 'WORKSPACE_DOMAIN_RESTRICTED' } });
   });
 
-  it('rejects mass-assignment fields and weak passwords', async () => {
+  it('rejects mass-assignment fields and client-supplied passwords', async () => {
     const { env } = await testEnv();
     const patch = await handleWorkspaceRequest(new Request('https://worker.test/api/workspace/users/id', {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'SUPER_ADMIN' }),
@@ -82,7 +127,7 @@ describe('Workspace API authorization and validation', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'user@example.org', firstName: 'A', lastName: 'B', password: 'weak' }),
     }), env, admin);
     expect(create?.status).toBe(400);
-    expect(await create?.json()).toMatchObject({ success: false, error: { code: 'VALIDATION_ERROR' } });
+    expect(await create?.json()).toMatchObject({ success: false, error: { code: 'PASSWORD_MUST_BE_GENERATED' } });
   });
 
   it('maps duplicate Workspace users to HTTP 409 without retrying create', async () => {
@@ -92,7 +137,7 @@ describe('Workspace API authorization and validation', () => {
       : Response.json({ error: { message: 'duplicate', errors: [{ reason: 'duplicate' }] } }, { status: 409 }));
     vi.stubGlobal('fetch', fetchMock);
     const result = await handleWorkspaceRequest(new Request('https://worker.test/api/workspace/users', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'user@example.org', firstName: 'A', lastName: 'B', password: 'StrongTemporaryPassword123!' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'user@example.org', firstName: 'A', lastName: 'B' }),
     }), env, admin);
     expect(result?.status).toBe(409);
     expect(await result?.json()).toMatchObject({ success: false, error: { code: 'WORKSPACE_USER_EXISTS' } });

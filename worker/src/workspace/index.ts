@@ -1158,10 +1158,276 @@ async function deleteApplicationUser(uid: string, request: Request, env: Workspa
   return response({ uid, email, workspaceMailboxPreserved: true, storedFilesPreserved: true }, 'Firebase account and application data deleted; Workspace mailbox and stored files preserved.');
 }
 
+const ssoScopes = new Set(['email', 'profile', 'hyperdatalab_profile']);
+
+type SsoClientRow = {
+  client_id: string; client_secret_hash: string | null; name: string; description: string | null;
+  client_type: 'PUBLIC' | 'CONFIDENTIAL'; redirect_uris_json: string; allowed_scopes_json: string;
+  is_active: number; created_at: string; updated_at: string;
+};
+
+function ssoClientDto(client: SsoClientRow) {
+  return {
+    clientId: client.client_id, name: client.name, description: client.description,
+    clientType: client.client_type, redirectUris: JSON.parse(client.redirect_uris_json) as string[],
+    allowedScopes: JSON.parse(client.allowed_scopes_json) as string[], isActive: client.is_active === 1,
+    createdAt: client.created_at, updatedAt: client.updated_at,
+  };
+}
+
+function validateSsoRedirectUris(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20) jsonError(400, 'VALIDATION_ERROR', 'Add between 1 and 20 exact callback URLs.');
+  const uris = [...new Set(value.map((item) => typeof item === 'string' ? item.trim() : ''))];
+  for (const value of uris) {
+    if (!value || value.includes('*')) jsonError(400, 'VALIDATION_ERROR', 'Callback URLs must be exact URLs.');
+    let url: URL;
+    try { url = new URL(value); } catch { jsonError(400, 'VALIDATION_ERROR', 'A callback URL is invalid.'); }
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (url.hash || url.username || url.password || (url.protocol !== 'https:' && !local)) jsonError(400, 'VALIDATION_ERROR', 'Callback URLs must use HTTPS except on localhost.');
+  }
+  return uris;
+}
+
+async function listSsoClients(env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.oauth.manage', env);
+  const result = await env.DB.prepare('SELECT * FROM sso_clients ORDER BY created_at DESC').all<SsoClientRow>();
+  return response({ clients: (result.results || []).map(ssoClientDto) });
+}
+
+async function createSsoClient(request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.oauth.manage', env);
+  const input = await parseJson(request);
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  if (name.length < 2 || name.length > 100) jsonError(400, 'VALIDATION_ERROR', 'Client name must contain 2–100 characters.');
+  const description = typeof input.description === 'string' ? input.description.trim().slice(0, 500) : null;
+  const redirectUris = validateSsoRedirectUris(input.redirectUris);
+  if (!['PUBLIC', 'CONFIDENTIAL'].includes(String(input.clientType))) jsonError(400, 'VALIDATION_ERROR', 'Choose PUBLIC or CONFIDENTIAL client type.');
+  const clientType = input.clientType as 'PUBLIC' | 'CONFIDENTIAL';
+  const scopes = Array.isArray(input.allowedScopes) ? [...new Set(input.allowedScopes.filter((scope): scope is string => typeof scope === 'string'))] : ['email', 'profile'];
+  if (!scopes.length || scopes.some((scope) => !ssoScopes.has(scope))) jsonError(400, 'VALIDATION_ERROR', 'One or more profile scopes are unsupported.');
+  const clientId = `hd_${randomToken(18)}`;
+  const clientSecret = clientType === 'CONFIDENTIAL' ? `hds_${randomToken(32)}` : null;
+  const now = new Date().toISOString();
+  await env.DB.prepare(`INSERT INTO sso_clients (client_id, client_secret_hash, name, description, client_type, redirect_uris_json, allowed_scopes_json, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
+    .bind(clientId, clientSecret ? await sha256(clientSecret) : null, name, description, clientType, JSON.stringify(redirectUris), JSON.stringify(scopes), now, now).run();
+  await audit(env, identity.uid, 'SSO_CLIENT_CREATED', 'SUCCESS', clientId, clientType);
+  return response({ client: {
+    clientId, clientSecret, name, description, clientType, redirectUris, allowedScopes: scopes,
+    isActive: true, createdAt: now, updatedAt: now,
+  } }, 'Client registered. Save the secret now; it is only shown once.', 201);
+}
+
+async function setSsoClientActive(clientId: string, request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.oauth.manage', env);
+  if (!/^hd_[A-Za-z0-9_-]{20,40}$/.test(clientId)) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  const input = await parseJson(request);
+  if (typeof input.isActive !== 'boolean') jsonError(400, 'VALIDATION_ERROR', 'isActive must be true or false.');
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare('UPDATE sso_clients SET is_active = ?, updated_at = ? WHERE client_id = ?')
+    .bind(input.isActive ? 1 : 0, now, clientId).run();
+  if (result.meta?.changes !== 1) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  await audit(env, identity.uid, input.isActive ? 'SSO_CLIENT_ENABLED' : 'SSO_CLIENT_DISABLED', 'SUCCESS', clientId);
+  return response({ clientId, isActive: input.isActive });
+}
+
+async function deleteSsoClient(clientId: string, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.oauth.manage', env);
+  if (!/^hd_[A-Za-z0-9_-]{20,40}$/.test(clientId)) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  const client = await env.DB.prepare('SELECT name FROM sso_clients WHERE client_id = ?').bind(clientId).first<{ name: string }>();
+  if (!client) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sso_authorization_requests WHERE client_id = ?').bind(clientId),
+    env.DB.prepare('DELETE FROM sso_authorization_codes WHERE client_id = ?').bind(clientId),
+    env.DB.prepare('DELETE FROM sso_access_tokens WHERE client_id = ?').bind(clientId),
+    env.DB.prepare('DELETE FROM sso_clients WHERE client_id = ?').bind(clientId),
+  ]);
+  await audit(env, identity.uid, 'SSO_CLIENT_DELETED', 'SUCCESS', clientId, client.name);
+  return response({ clientId, deleted: true }, 'SSO client deleted and issued tokens revoked.');
+}
+
+function ssoLoginRedirect(env: WorkspaceEnv, requestId: string) {
+  const allowed = (env.ALLOWED_ORIGINS || env.FRONTEND_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean);
+  const target = new URL('/login', env.FRONTEND_URL);
+  if (!allowed.includes(target.origin)) jsonError(503, 'FRONTEND_NOT_CONFIGURED', 'The login frontend is not allowlisted.');
+  target.searchParams.set('sso_request', requestId);
+  return Response.redirect(target.toString(), 302);
+}
+
+async function beginSsoAuthorization(request: Request, env: WorkspaceEnv) {
+  const url = new URL(request.url);
+  const clientId = url.searchParams.get('client_id') || '';
+  const redirectUri = url.searchParams.get('redirect_uri') || '';
+  const state = url.searchParams.get('state') || '';
+  const challenge = url.searchParams.get('code_challenge') || '';
+  const scopes = (url.searchParams.get('scope') || '').split(/\s+/).filter(Boolean);
+  if (url.searchParams.get('response_type') !== 'code' || !clientId || !state || state.length > 512
+    || !/^[A-Za-z0-9_-]{43,128}$/.test(challenge) || url.searchParams.get('code_challenge_method') !== 'S256') {
+    jsonError(400, 'INVALID_AUTHORIZATION_REQUEST', 'Use authorization code flow with state and PKCE S256.');
+  }
+  const client = await env.DB.prepare('SELECT * FROM sso_clients WHERE client_id = ? AND is_active = 1').bind(clientId).first<SsoClientRow>();
+  if (!client || !(JSON.parse(client.redirect_uris_json) as string[]).includes(redirectUri)) jsonError(400, 'INVALID_CLIENT_OR_REDIRECT_URI', 'Client or exact callback URL is not registered.');
+  const allowedScopes = JSON.parse(client.allowed_scopes_json) as string[];
+  if (!scopes.length || scopes.some((scope) => !allowedScopes.includes(scope) || !ssoScopes.has(scope))) jsonError(400, 'INVALID_SCOPE', 'The client did not request an allowed profile scope.');
+  const requestId = randomToken(24);
+  const now = new Date().toISOString();
+  await env.DB.prepare('DELETE FROM sso_authorization_requests WHERE expires_at <= ? OR consumed_at IS NOT NULL').bind(now).run();
+  await env.DB.prepare('DELETE FROM sso_authorization_codes WHERE expires_at <= ? OR consumed_at IS NOT NULL').bind(now).run();
+  await env.DB.prepare(`INSERT INTO sso_authorization_requests
+    (request_id, client_id, redirect_uri, state, code_challenge, scopes_json, expires_at, consumed_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`)
+    .bind(requestId, clientId, redirectUri, state, challenge, JSON.stringify(scopes), new Date(Date.now() + 10 * 60 * 1000).toISOString(), now).run();
+  return ssoLoginRedirect(env, requestId);
+}
+
+async function completeSsoAuthorization(request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity, firebaseToken: string, requestId: string) {
+  if (!/^[A-Za-z0-9_-]{24,40}$/.test(requestId)) jsonError(400, 'INVALID_AUTHORIZATION_REQUEST', 'SSO request is invalid or expired.');
+  const profileApplication = await loadRegistrationApplication(env, firebaseToken, identity.uid);
+  const profile = profileApplication.values;
+  const workspaceEmail = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
+  if (!profileApplication.profileExists || profile.status !== 'APPROVED' || profile.isActive !== true
+    || !['ADMIN', 'LECTURER', 'STUDENT'].includes(String(profile.role))
+    || workspaceEmail.split('@')[1] !== configuredDomain(env)) {
+    jsonError(403, 'PROFILE_NOT_APPROVED', 'Only an approved, active Workspace profile can use SSO.');
+  }
+  const requestRow = await env.DB.prepare(`SELECT r.*, c.redirect_uris_json, c.is_active FROM sso_authorization_requests r
+    JOIN sso_clients c ON c.client_id = r.client_id
+    WHERE r.request_id = ? AND r.expires_at > ? AND r.consumed_at IS NULL`)
+    .bind(requestId, new Date().toISOString()).first<{
+      request_id: string; client_id: string; redirect_uri: string; state: string; code_challenge: string;
+      scopes_json: string; redirect_uris_json: string; is_active: number;
+    }>();
+  if (!requestRow || requestRow.is_active !== 1 || !(JSON.parse(requestRow.redirect_uris_json) as string[]).includes(requestRow.redirect_uri)) {
+    jsonError(400, 'INVALID_AUTHORIZATION_REQUEST', 'SSO request is invalid or expired.');
+  }
+  const consumed = await env.DB.prepare('UPDATE sso_authorization_requests SET consumed_at = ? WHERE request_id = ? AND consumed_at IS NULL AND expires_at > ?')
+    .bind(new Date().toISOString(), requestId, new Date().toISOString()).run();
+  if (consumed.meta?.changes !== 1) jsonError(400, 'INVALID_AUTHORIZATION_REQUEST', 'SSO request was already used. Start again from the application.');
+  const code = randomToken(32);
+  const createdAt = new Date().toISOString();
+  await env.DB.prepare(`INSERT INTO sso_authorization_codes
+    (code_hash, client_id, profile_uid, redirect_uri, code_challenge, scopes_json, expires_at, consumed_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`)
+    .bind(await sha256(code), requestRow.client_id, identity.uid, requestRow.redirect_uri, requestRow.code_challenge,
+      requestRow.scopes_json, new Date(Date.now() + 2 * 60 * 1000).toISOString(), createdAt).run();
+  const callback = new URL(requestRow.redirect_uri);
+  callback.searchParams.set('code', code);
+  callback.searchParams.set('state', requestRow.state);
+  return response({ redirectUrl: callback.toString() }, 'SSO authorization completed.');
+}
+
+async function parseOAuthBody(request: Request) {
+  const contentType = request.headers.get('content-type') || '';
+  if (contentType.includes('application/x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(await request.text()).entries());
+  return parseJson(request);
+}
+
+async function validateSsoClientSecret(client: SsoClientRow, secret: unknown) {
+  if (client.client_type === 'PUBLIC') return secret == null || secret === '';
+  if (typeof secret !== 'string' || !client.client_secret_hash) return false;
+  const actual = await sha256(secret);
+  if (actual.length !== client.client_secret_hash.length) return false;
+  let difference = 0;
+  for (let index = 0; index < actual.length; index += 1) difference |= actual.charCodeAt(index) ^ client.client_secret_hash.charCodeAt(index);
+  return difference === 0;
+}
+
+async function exchangeSsoCode(request: Request, env: WorkspaceEnv) {
+  const input = await parseOAuthBody(request);
+  if (input.grant_type !== 'authorization_code') jsonError(400, 'UNSUPPORTED_GRANT_TYPE', 'Only authorization_code is supported.');
+  let basicCredentials: { clientId: string; clientSecret: string } | null = null;
+  const authorization = request.headers.get('authorization') || '';
+  const basic = authorization.match(/^Basic\s+([A-Za-z0-9+/]+={0,2})$/i)?.[1];
+  if (basic) {
+    try {
+      const decoded = atob(basic);
+      const separator = decoded.indexOf(':');
+      if (separator > 0) basicCredentials = { clientId: decodeURIComponent(decoded.slice(0, separator)), clientSecret: decodeURIComponent(decoded.slice(separator + 1)) };
+    } catch { /* Invalid HTTP Basic credentials are handled as invalid client credentials below. */ }
+  }
+  const clientId = typeof input.client_id === 'string' ? input.client_id : basicCredentials?.clientId || '';
+  const client = await env.DB.prepare('SELECT * FROM sso_clients WHERE client_id = ? AND is_active = 1').bind(clientId).first<SsoClientRow>();
+  const clientSecret = typeof input.client_secret === 'string' ? input.client_secret : basicCredentials?.clientSecret;
+  if (!client || !await validateSsoClientSecret(client, clientSecret)) jsonError(401, 'INVALID_CLIENT', 'Client credentials are invalid.');
+  const code = typeof input.code === 'string' ? input.code : '';
+  const redirectUri = typeof input.redirect_uri === 'string' ? input.redirect_uri : '';
+  const verifier = typeof input.code_verifier === 'string' ? input.code_verifier : '';
+  if (!code || !redirectUri || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) jsonError(400, 'INVALID_REQUEST', 'Authorization code, redirect_uri, and PKCE verifier are required.');
+  const hash = await sha256(code);
+  const record = await env.DB.prepare('SELECT * FROM sso_authorization_codes WHERE code_hash = ? AND client_id = ? AND expires_at > ? AND consumed_at IS NULL')
+    .bind(hash, clientId, new Date().toISOString()).first<{
+      code_hash: string; client_id: string; profile_uid: string; redirect_uri: string; code_challenge: string; scopes_json: string;
+    }>();
+  if (!record || record.redirect_uri !== redirectUri || await createPkceChallenge(verifier) !== record.code_challenge) jsonError(400, 'INVALID_GRANT', 'The authorization code, callback URL, or PKCE verifier is invalid.');
+  const consumed = await env.DB.prepare('UPDATE sso_authorization_codes SET consumed_at = ? WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?')
+    .bind(new Date().toISOString(), hash, new Date().toISOString()).run();
+  if (consumed.meta?.changes !== 1) jsonError(400, 'INVALID_GRANT', 'Authorization code was already used.');
+  const token = randomToken(40);
+  const now = new Date().toISOString();
+  await env.DB.prepare('DELETE FROM sso_access_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL').bind(now).run();
+  await env.DB.prepare('INSERT INTO sso_access_tokens (token_hash, client_id, profile_uid, scopes_json, expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)')
+    .bind(await sha256(token), clientId, record.profile_uid, record.scopes_json, new Date(Date.now() + 60 * 60 * 1000).toISOString(), now).run();
+  return Response.json({ access_token: token, token_type: 'Bearer', expires_in: 3600, scope: (JSON.parse(record.scopes_json) as string[]).join(' ') }, { headers: { 'cache-control': 'no-store' } });
+}
+
+async function ssoUserInfo(request: Request, env: WorkspaceEnv) {
+  const token = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] || '';
+  if (!token) jsonError(401, 'INVALID_TOKEN', 'A bearer access token is required.');
+  const tokenRecord = await env.DB.prepare(`SELECT t.*, c.is_active FROM sso_access_tokens t JOIN sso_clients c ON c.client_id = t.client_id
+    WHERE t.token_hash = ? AND t.expires_at > ? AND t.revoked_at IS NULL`)
+    .bind(await sha256(token), new Date().toISOString()).first<{ profile_uid: string; scopes_json: string; is_active: number }>();
+  if (!tokenRecord || tokenRecord.is_active !== 1) jsonError(401, 'INVALID_TOKEN', 'Access token is invalid or expired.');
+  const serviceToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const profileResponse = await fetch(`${firestoreBase(env)}/userProfiles/${encodeURIComponent(tokenRecord.profile_uid)}`, {
+    headers: { authorization: `Bearer ${serviceToken}` }, signal: AbortSignal.timeout(8000),
+  });
+  if (!profileResponse.ok) jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
+  const document = await profileResponse.json() as FirestoreDocument;
+  const profile = Object.fromEntries(Object.entries(document.fields || {}).map(([key, value]) => [key, decodeFirestoreValue(value)])) as Record<string, unknown>;
+  const email = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
+  if (profile.status !== 'APPROVED' || profile.isActive !== true || email.split('@')[1] !== configuredDomain(env)) {
+    jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
+  }
+  const scopes = new Set(JSON.parse(tokenRecord.scopes_json) as string[]);
+  const name = typeof profile.name === 'string' ? profile.name : [profile.firstName, profile.lastName].filter((part) => typeof part === 'string' && part).join(' ');
+  return Response.json({
+    sub: tokenRecord.profile_uid,
+    ...(scopes.has('email') ? { email, email_verified: true } : {}),
+    ...(scopes.has('profile') ? { name, picture: profile.avatarUrl || profile.photoURL || null } : {}),
+    ...(scopes.has('hyperdatalab_profile') ? {
+      role: profile.role, student_id: profile.studentId || null, major: profile.major || null,
+    } : {}),
+  }, { headers: { 'cache-control': 'no-store' } });
+}
+
+async function revokeSsoToken(request: Request, env: WorkspaceEnv) {
+  const input = await parseOAuthBody(request);
+  const token = typeof input.token === 'string' ? input.token : '';
+  if (token) await env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
+    .bind(new Date().toISOString(), await sha256(token)).run();
+  return Response.json({}, { headers: { 'cache-control': 'no-store' } });
+}
+
 export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv, identity?: WorkspaceIdentity, firebaseToken = ''): Promise<Response | null> {
   const url = new URL(request.url);
   try {
+    if (url.pathname === '/oauth/authorize' && request.method === 'GET') return await beginSsoAuthorization(request, env);
+    if (url.pathname === '/oauth/token' && request.method === 'POST') return await exchangeSsoCode(request, env);
+    if (url.pathname === '/oauth/userinfo' && request.method === 'GET') return await ssoUserInfo(request, env);
+    if (url.pathname === '/oauth/revoke' && request.method === 'POST') return await revokeSsoToken(request, env);
+    if (url.pathname.startsWith('/oauth/')) jsonError(404, 'NOT_FOUND', 'SSO OAuth endpoint was not found.');
     if (!env.DB || typeof env.DB.prepare !== 'function') jsonError(503, 'WORKSPACE_NOT_CONFIGURED', 'Workspace storage is not configured on this Worker.');
+    if (url.pathname === '/api/sso/authorize/complete' && request.method === 'POST' && identity) {
+      const input = await parseJson(request);
+      const requestId = typeof input.requestId === 'string' ? input.requestId : '';
+      return await completeSsoAuthorization(request, env, identity, firebaseToken, requestId);
+    }
+    if (url.pathname === '/api/sso/clients' && request.method === 'GET' && identity) return await listSsoClients(env, identity);
+    if (url.pathname === '/api/sso/clients' && request.method === 'POST' && identity) return await createSsoClient(request, env, identity);
+    const ssoClientMatch = url.pathname.match(/^\/api\/sso\/clients\/([^/]+)$/);
+    if (ssoClientMatch && request.method === 'DELETE' && identity) return await deleteSsoClient(decodeURIComponent(ssoClientMatch[1]), env, identity);
+    if (ssoClientMatch && request.method === 'PATCH' && identity) return await setSsoClientActive(decodeURIComponent(ssoClientMatch[1]), request, env, identity);
+    if (url.pathname.startsWith('/api/sso/')) jsonError(identity ? 404 : 401, identity ? 'NOT_FOUND' : 'UNAUTHENTICATED', identity ? 'SSO API endpoint was not found.' : 'An approved Firebase account is required.');
     if (url.pathname === '/auth/google/callback' && request.method === 'GET') return await callback(request, env);
     if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST' && identity) return await exchangeWorkspaceLogin(env, identity);
     if (!identity) jsonError(401, 'UNAUTHENTICATED', 'Firebase authentication is required.');
