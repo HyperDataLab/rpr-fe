@@ -267,7 +267,11 @@ async function formatPublication(record: Row, uid: string, assignment?: Row | nu
     ? await getDoc(doc(firestoreDb(), collections.profiles, uid))
     : null;
   const profile = ownProfile?.exists() ? ownProfile.data() : null;
-  const myReviewRow = assignment || await getCurrentAssignment(record, uid);
+  // Callers that format repository/list items resolve assignments from the
+  // reviewer's authorized query first. Do not probe a guessed document ID:
+  // Firestore can deny a get for a missing assignment document under the
+  // reviewer-only read rule and reject the entire publication list.
+  const myReviewRow = assignment || null;
   const myReview = myReviewRow ? {
     id: myReviewRow.id,
     reviewerId: String(myReviewRow.reviewerId || uid),

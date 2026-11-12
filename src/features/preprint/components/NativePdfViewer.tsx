@@ -52,11 +52,13 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
   const pageInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchGenerationRef = useRef(0);
+  const nearbyPagesRef = useRef(new Set<number>([1, 2, 3]));
   const [scale, setScale] = useState(1);
   const [fitMode, setFitMode] = useState<FitMode>('width');
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [pageRatio, setPageRatio] = useState(0.707);
   const [pageCount, setPageCount] = useState(0);
+  const [renderedPages, setRenderedPages] = useState<Set<number>>(() => new Set([1, 2, 3]));
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState('1');
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
@@ -83,6 +85,8 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
     setPdfObjectUrl(null);
     setPdfError(null);
     setPageCount(0);
+    nearbyPagesRef.current = new Set([1, 2, 3]);
+    setRenderedPages(new Set([1, 2, 3]));
     setCurrentPage(1);
     setPageInput('1');
     setPdfDocument(null);
@@ -166,6 +170,31 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
     pages.forEach((page) => observer.observe(page));
     return () => observer.disconnect();
   }, [pageCount, pdfObjectUrl, showThumbnails]);
+
+  // Keep lightweight page placeholders for accurate scrolling, but only mount
+  // React-PDF canvases near the viewport. Rendering every page eagerly makes
+  // long papers consume substantial CPU and canvas memory after download.
+  useEffect(() => {
+    const node = canvasRef.current;
+    if (!node || !pageCount) return;
+    nearbyPagesRef.current = new Set([1, 2, 3].filter((page) => page <= pageCount));
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const page = Number((entry.target as HTMLElement).dataset.pdfPage);
+        if (!Number.isInteger(page) || page < 1) continue;
+        if (entry.isIntersecting) nearbyPagesRef.current.add(page);
+        else nearbyPagesRef.current.delete(page);
+      }
+
+      const nextPages = new Set(nearbyPagesRef.current);
+      setRenderedPages((previous) => {
+        if (previous.size === nextPages.size && [...previous].every((page) => nextPages.has(page))) return previous;
+        return nextPages;
+      });
+    }, { root: node, rootMargin: '800px 0px', threshold: 0 });
+    node.querySelectorAll<HTMLElement>('[data-pdf-page]').forEach((page) => observer.observe(page));
+    return () => observer.disconnect();
+  }, [pageCount, pdfObjectUrl]);
 
   useEffect(() => {
     setPageInput(String(currentPage));
@@ -439,17 +468,20 @@ export function NativePdfViewer({ url, fileName }: NativePdfViewerProps) {
               {Array.from({ length: pageCount }, (_, index) => {
                 const page = index + 1;
                 return (
-                  <article key={page} id={`pdf-${viewerId}-page-${page}`} data-pdf-page={page} className="native-pdf-page-card" aria-label={`Trang ${page} trên ${pageCount}`}>
-                    <Page
-                      pageNumber={page}
-                      width={pageWidth}
-                      renderAnnotationLayer
-                      renderTextLayer
-                      customTextRenderer={customTextRenderer}
-                      className="native-pdf-rendered-page"
-                      onLoadSuccess={onPageLoadSuccess}
-                      loading={<div className="native-pdf-page-skeleton" aria-hidden="true" />}
-                    />
+                  <article key={page} id={`pdf-${viewerId}-page-${page}`} data-pdf-page={page} className="native-pdf-page-card" aria-label={`Trang ${page} trên ${pageCount}`} style={!renderedPages.has(page) ? { aspectRatio: `${pageRatio}` } : undefined}>
+                    {renderedPages.has(page) ? (
+                      <Page
+                        pageNumber={page}
+                        width={pageWidth}
+                        devicePixelRatio={1.5}
+                        renderAnnotationLayer
+                        renderTextLayer
+                        customTextRenderer={customTextRenderer}
+                        className="native-pdf-rendered-page"
+                        onLoadSuccess={onPageLoadSuccess}
+                        loading={<div className="native-pdf-page-skeleton" aria-hidden="true" />}
+                      />
+                    ) : <div className="native-pdf-page-skeleton" aria-hidden="true" style={{ aspectRatio: `${pageRatio}` }} />}
                   </article>
                 );
               })}

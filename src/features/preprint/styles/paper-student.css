@@ -825,6 +825,10 @@
   flex-wrap: wrap;
 }
 
+.lecturer-reviews-filter-toolbar {
+  margin-bottom: 16px;
+}
+
 .student-tabs-pills {
   display: flex;
   align-items: center;
