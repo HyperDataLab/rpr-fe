@@ -230,7 +230,6 @@ export function AdminRegistrationsView() {
   return (
     <AdminShell active="registrations" title={t('admin.registrationsTitle')} pendingCount={pendingCount}>
       <AdminPageHeader
-        eyebrow={t('admin.usersEyebrow')}
         title={t('admin.registrationsTitle')}
         description={t('admin.registrationsDesc')}
       />

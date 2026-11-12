@@ -20,13 +20,11 @@ function PreprintVersionsShell({
   title,
   actions,
   children,
-  kicker,
 }: {
   isLecturer: boolean;
   title: string;
   actions?: React.ReactNode;
   children: React.ReactNode;
-  kicker?: string;
 }) {
   return isLecturer ? (
     <LecturerShell active="submissions" title={title}>
@@ -36,7 +34,6 @@ function PreprintVersionsShell({
   ) : (
     <StudentShell
       title={title}
-      kicker={kicker}
       actions={actions}
     >
       {children}
@@ -82,15 +79,10 @@ export function PreprintVersionsView({ id }: PreprintVersionsViewProps) {
     ? `${t('student.preprints.versionsHistory')}: ${item.title}`
     : t('student.preprints.versionsHistory');
 
-  const kicker = isLecturer
-    ? (locale === 'vi' ? 'Lịch sử dòng đời bản thảo' : 'Manuscript Lifecycle History')
-    : (locale === 'vi' ? 'Dòng thời gian & Xuất xứ phiên bản' : 'Timeline & Version Provenance');
-
   return (
     <PreprintVersionsShell
       isLecturer={isLecturer}
       title={pageTitle}
-      kicker={kicker}
       actions={
         item && (
           <div className="student-detail-top-actions">

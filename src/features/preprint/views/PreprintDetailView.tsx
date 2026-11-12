@@ -203,12 +203,6 @@ export function PreprintDetailView({ id }: PreprintDetailViewProps) {
         <div className="student-detail-wrap">
           {/* 1. Hero Article Header */}
           <section className="student-paper-hero">
-            <div className="student-paper-hero__top">
-              <div className="student-paper-hero__eyebrow">
-                <span className="student-paper-hero__kicker">BẢN THẢO NGHIÊN CỨU</span>
-              </div>
-            </div>
-
             <h1 className="student-paper-hero__title">{item.title}</h1>
 
             {/* Authors Byline */}

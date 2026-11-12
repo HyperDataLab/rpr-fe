@@ -181,9 +181,7 @@
       "versionsHistory": "Version History",
       "manuscriptPrefix": "Manuscript",
       "submitRevision": "Submit Revision",
-      "editDraft": "Edit Draft",
-      "submittedManuscript": "Submitted Manuscript",
-      "registerManuscript": "Manuscript Submission"
+      "editDraft": "Edit Draft"
     },
     "feedback": {
       "title": "Faculty & Mentor Feedback",
@@ -230,7 +228,6 @@
     "submittedDate": "Updated Date",
     "reviewDetails": "Review Details",
     "noSubmissions": "No submissions found matching criteria",
-    "editorialWorkspace": "Editorial Workspace",
     "submissionsManagement": "Submissions Management",
     "submissionsDesc": "Track incoming manuscripts, monitor peer evaluations, and oversee publication workflows across all stages.",
     "searchSubmissions": "Search title, author or keyword...",
@@ -239,7 +236,6 @@
     "system": "System",
     "pageOf": "Page {page} of {totalPages}",
     "totalSubmissionsNum": "{total} total submissions",
-    "reviewsEyebrow": "Editorial Review Matrix",
     "reviewsTitle": "Review Oversight",
     "reviewsDesc": "Monitor faculty peer evaluations, track review SLAs, and evaluate lecturer recommendations across all manuscripts.",
     "browseSubmissions": "Browse Submissions →",
@@ -259,7 +255,6 @@
     "evaluationComplete": "Evaluation complete",
     "expectedSla": "Expected SLA 48–72h",
     "facultyReviewerDefault": "Faculty Reviewer",
-    "usersEyebrow": "Access Administration",
     "usersTitle": "User Management",
     "usersDesc": "Manage system user accounts, configure role permissions, and track active statuses.",
     "registrationsTitle": "Registration Requests",

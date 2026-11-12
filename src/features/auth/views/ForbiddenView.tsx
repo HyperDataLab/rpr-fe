@@ -10,7 +10,6 @@ export function ForbiddenView() {
     <main className="content forbidden-page">
       <Panel className="section-panel">
         <PageHeader
-          eyebrow="Access boundary"
           title="You do not have access to this workspace."
           description="Your account does not have the role required for this workspace. Return to the public gateway or sign in with an approved account."
         />

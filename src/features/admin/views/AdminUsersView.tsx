@@ -397,7 +397,6 @@ export function AdminUsersView() {
   return (
     <AdminShell active="users" title={t('admin.usersTitle')}>
       <AdminPageHeader
-        eyebrow={t('admin.usersEyebrow')}
         title={t('admin.usersTitle')}
         description={t('admin.usersDesc')}
       />

@@ -150,7 +150,6 @@ export default function PublicPreprintLanding() {
                 <div className="pl-tools-menu__panel" id="pl-tools-menu-panel" aria-label="Công cụ HyperDataLab">
                   <div className="pl-tools-menu__content">
                     <div className="pl-tools-menu__intro">
-                      <span className="pl-tools-menu__eyebrow">Hệ sinh thái HyperDataLab</span>
                       <h2>Công cụ nghiên cứu</h2>
                       <p>Khám phá các nền tảng hỗ trợ quy trình nghiên cứu và xuất bản học thuật.</p>
                     </div>
