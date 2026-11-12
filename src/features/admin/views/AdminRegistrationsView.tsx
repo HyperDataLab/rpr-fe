@@ -1,11 +1,28 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { Button } from '@hyperdata/design-system';
 import { AdminPageHeader, AdminShell } from '../components';
 import { adminApi, type AdminUser } from '../api';
 import { TableSkeleton } from '@/components/skeleton';
 import { useTranslation } from '@/i18n';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { firestoreDb } from '@/lib/firebase/client';
+
+const approvalInputStyle: CSSProperties = {
+  width: '100%', height: 42, border: '1px solid #cbd5e1', borderRadius: 8,
+  padding: '0 12px', color: '#0f172a', background: '#fff', font: 'inherit',
+};
+const approvalLabelStyle: CSSProperties = { display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 600 };
+const approvalTwoColumnStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 };
+
+function timestampIso(value: unknown) {
+  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    return (value.toDate as () => Date)().toISOString();
+  }
+  return value instanceof Date ? value.toISOString() : typeof value === 'string' ? value : '';
+}
 
 function getUserInitials(name?: string | null, email?: string): string {
   if (name?.trim()) {
@@ -23,6 +40,7 @@ function getUserInitials(name?: string | null, email?: string): string {
 
 export function AdminRegistrationsView() {
   const { t, locale } = useTranslation();
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 
@@ -33,6 +51,16 @@ export function AdminRegistrationsView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [approvalModal, setApprovalModal] = useState<{
+    applicant: AdminUser;
+    workspaceEmail: string;
+    firstName: string;
+    lastName: string;
+    studentId: string;
+    major: string;
+  } | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const previousPendingIds = useRef<Set<string> | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{
     open: boolean;
@@ -46,66 +74,69 @@ export function AdminRegistrationsView() {
 
   const PAGE_SIZE = 10;
 
-  const refreshPending = (targetPage = page) => {
+  useEffect(() => {
+    if (!user?.id || user.role !== 'ADMIN' || !user.isActive || user.status !== 'APPROVED') {
+      setPendingUsers([]);
+      setPagination({ page: 1, totalPages: 1, total: 0 });
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    adminApi
-      .listPendingUsers({ page: targetPage, limit: PAGE_SIZE })
-      .then((next) => {
-        setPendingUsers(next.users);
-        setPagination(next.pagination);
-        if (next.users.length === 0 && targetPage > 1) {
-          setPage(targetPage - 1);
-        }
-      })
-      .catch((reason: unknown) => {
-        setPendingUsers([]);
-        setPagination(null);
-        setError(reason instanceof Error ? reason.message : 'Unable to load pending registrations.');
-      })
-      .finally(() => setLoading(false));
-  };
+    const pendingQuery = query(
+      collection(firestoreDb(), 'registrationRequests'),
+      where('status', '==', 'PENDING'),
+      limit(1000),
+    );
+    return onSnapshot(pendingQuery, { includeMetadataChanges: true }, (snapshot) => {
+      // Do not let a stale local cache masquerade as the current registration list.
+      if (snapshot.metadata.fromCache) return;
+      const allUsers = snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          email: String(data.email || ''),
+          workspaceEmail: typeof data.workspaceEmail === 'string' ? data.workspaceEmail : null,
+          username: typeof data.username === 'string' ? data.username : null,
+          name: typeof data.name === 'string' ? data.name : [data.firstName, data.lastName].filter((part) => typeof part === 'string' && part).join(' ') || null,
+          firstName: typeof data.firstName === 'string' ? data.firstName : null,
+          lastName: typeof data.lastName === 'string' ? data.lastName : null,
+          phone: typeof data.phone === 'string' ? data.phone : null,
+          studentId: typeof data.studentId === 'string' ? data.studentId : null,
+          major: typeof data.major === 'string' ? data.major : null,
+          avatarUrl: typeof data.avatarUrl === 'string' ? data.avatarUrl : null,
+          role: data.role === 'LECTURER' || data.role === 'ADMIN' ? data.role : 'STUDENT',
+          isActive: data.isActive === true,
+          status: data.status === 'APPROVED' || data.status === 'REJECTED' || data.status === 'SUSPENDED' || data.status === 'PENDING' ? data.status : 'PENDING',
+          mustChangePassword: data.mustChangePassword === true,
+          lastLoginAt: timestampIso(data.lastLoginAt) || null,
+          createdAt: timestampIso(data.createdAt),
+          updatedAt: timestampIso(data.updatedAt),
+        } satisfies AdminUser;
+      }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  useEffect(() => {
-    refreshPending(page);
-  }, [page]);
-
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let retry: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-
-    const connect = () => {
-      es = new EventSource('/api/admin/registrations/stream');
-      es.addEventListener('registration:new', () => {
-        refreshPending(page);
+      const currentIds = new Set(allUsers.map((item) => item.id));
+      const previousIds = previousPendingIds.current;
+      if (previousIds && [...currentIds].some((id) => !previousIds.has(id))) {
         setMessage(locale === 'vi' ? 'Có đăng ký mới chờ duyệt.' : 'A new registration is awaiting review.');
-      });
-      es.onerror = () => {
-        if (closed) return;
-        if (es && es.readyState === EventSource.CLOSED) {
-          retry = setTimeout(connect, 3000);
-        }
-      };
-    };
-    connect();
-
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshPending(page);
-        const dead = !es || es.readyState === EventSource.CLOSED;
-        if (dead && !retry) connect();
       }
-    };
-    document.addEventListener('visibilitychange', onVisibility);
+      previousPendingIds.current = currentIds;
 
-    return () => {
-      closed = true;
-      document.removeEventListener('visibilitychange', onVisibility);
-      if (retry) clearTimeout(retry);
-      es?.close();
-    };
-  }, [page]);
-
+      const totalPages = Math.ceil(allUsers.length / PAGE_SIZE) || 1;
+      const activePage = Math.min(page, totalPages);
+      setPagination({ page: activePage, totalPages, total: allUsers.length });
+      if (activePage !== page) setPage(activePage);
+      const start = (activePage - 1) * PAGE_SIZE;
+      setPendingUsers(allUsers.slice(start, start + PAGE_SIZE));
+      setError(null);
+      setLoading(false);
+    }, (reason) => {
+      setError(reason.message || 'Unable to listen for pending registrations.');
+      setPendingUsers([]);
+      setPagination({ page: 1, totalPages: 1, total: 0 });
+      setLoading(false);
+    });
+  }, [locale, page, user?.id, user?.isActive, user?.role, user?.status]);
   const filteredPendingUsers = useMemo(() => {
     if (!search.trim()) return pendingUsers;
     const q = search.toLowerCase().trim();
@@ -119,30 +150,33 @@ export function AdminRegistrationsView() {
   }, [pendingUsers, search]);
 
   const decidePendingUser = (user: AdminUser, decision: 'approve' | 'reject') => {
-    const isApprove = decision === 'approve';
+    if (decision === 'approve') {
+      const nameParts = (user.name || '').trim().split(/\s+/).filter(Boolean);
+      setApprovalError(null);
+      setApprovalModal({
+        applicant: user,
+        workspaceEmail: user.workspaceEmail || '',
+        firstName: user.firstName || nameParts[0] || '',
+        lastName: user.lastName || nameParts.slice(1).join(' '),
+        studentId: user.studentId || '',
+        major: user.major || '',
+      });
+      return;
+    }
     setConfirmModal({
       open: true,
-      title: isApprove
-        ? (locale === 'vi' ? 'Duyệt đăng ký tài khoản' : 'Approve Registration')
-        : (locale === 'vi' ? 'Từ chối đăng ký tài khoản' : 'Reject Registration'),
-      description: isApprove
-        ? (locale === 'vi' ? `Xác nhận duyệt yêu cầu đăng ký của ${user.email}? Tài khoản sẽ được kích hoạt kèm mật khẩu tạm gửi qua email.` : `Approve registration request for ${user.email}? Temporary credentials will be issued.`)
-        : (locale === 'vi' ? `Xác nhận từ chối yêu cầu đăng ký của ${user.email}?` : `Reject registration request for ${user.email}?`),
-      confirmLabel: isApprove ? (locale === 'vi' ? 'Duyệt' : 'Approve') : (locale === 'vi' ? 'Từ chối' : 'Reject'),
+      title: locale === 'vi' ? 'Từ chối đăng ký tài khoản' : 'Reject Registration',
+      description: locale === 'vi' ? `Xác nhận từ chối yêu cầu đăng ký của ${user.email}?` : `Reject registration request for ${user.email}?`,
+      confirmLabel: locale === 'vi' ? 'Từ chối' : 'Reject',
       cancelLabel: locale === 'vi' ? 'Hủy' : 'Cancel',
-      isDanger: !isApprove,
+      isDanger: true,
       onConfirm: async () => {
         setBusyId(user.id);
         setMessage(null);
         setError(null);
         try {
-          await (decision === 'approve' ? adminApi.approveUser(user.id) : adminApi.rejectUser(user.id));
-          refreshPending(page);
-          setMessage(
-            decision === 'approve'
-              ? (locale === 'vi' ? `Đã duyệt đăng ký cho ${user.name || user.email}. Thông tin đăng nhập tạm thời đã được gửi.` : `Approved registration for ${user.name || user.email}. Temporary credentials issued.`)
-              : (locale === 'vi' ? `Đã từ chối đăng ký cho ${user.email}.` : `Registration for ${user.email} was rejected.`),
-          );
+          await adminApi.rejectUser(user.id);
+          setMessage(locale === 'vi' ? `Đã từ chối đăng ký cho ${user.email}.` : `Registration for ${user.email} was rejected.`);
         } catch (reason: unknown) {
           setError(reason instanceof Error ? reason.message : 'Unable to process pending registration.');
         } finally {
@@ -151,6 +185,44 @@ export function AdminRegistrationsView() {
         }
       },
     });
+  };
+
+  const submitApproval = async () => {
+    if (!approvalModal) return;
+    const { applicant, workspaceEmail, firstName, lastName, studentId, major } = approvalModal;
+    setBusyId(applicant.id);
+    setApprovalError(null);
+    setMessage(null);
+    try {
+      const result = await adminApi.approveUser(applicant.id, {
+        workspaceEmail: workspaceEmail.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        studentId: studentId.trim(),
+        major: major.trim(),
+      });
+      setApprovalModal(null);
+      if (result.onboardingEmailSent) {
+        setMessage(locale === 'vi'
+          ? `Đã duyệt ${applicant.name || applicant.email}, liên kết với mailbox ${result.workspaceEmail} có sẵn và gửi hướng dẫn đăng nhập đến ${applicant.email}.`
+          : `Approved ${applicant.name || applicant.email}, linked existing mailbox ${result.workspaceEmail}, and emailed sign-in instructions to ${applicant.email}.`);
+      } else {
+        setError(locale === 'vi'
+          ? `Đã duyệt và liên kết mailbox ${result.workspaceEmail}, nhưng gửi hướng dẫn đăng nhập thất bại. Dùng Resend access để gửi lại đến ${applicant.email}.`
+          : `Approved and linked ${result.workspaceEmail}, but the sign-in notice could not be delivered. Use Resend access to retry to ${applicant.email}.`);
+      }
+    } catch (reason: unknown) {
+      const errorMessage = reason instanceof Error ? reason.message : 'Unable to approve this registration.';
+      if (/WORKSPACE_ACCOUNT_REQUIRED|Workspace user was not found|Create the Workspace mailbox/i.test(errorMessage)) {
+        setApprovalError(locale === 'vi'
+          ? `Không tìm thấy mailbox ${workspaceEmail.trim()} trong Google Workspace. Chưa duyệt hồ sơ. Hãy tạo mailbox trước tại Quản lý tài khoản → Google Workspace, sau đó quay lại chọn đúng email này.`
+          : `Workspace mailbox ${workspaceEmail.trim()} was not found. The registration was not approved. Create the mailbox first in Account Management → Google Workspace, then return and enter its exact email address.`);
+      } else {
+        setApprovalError(errorMessage);
+      }
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const pendingCount = pagination?.total ?? pendingUsers.length;
@@ -388,6 +460,84 @@ export function AdminRegistrationsView() {
           </div>
         )}
       </div>
+
+      {approvalModal && (
+        <div className="admin-modal-backdrop" onClick={() => !busyId && setApprovalModal(null)}>
+          <form
+            className="admin-modal-card"
+            onSubmit={(event) => { event.preventDefault(); void submitApproval(); }}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="registration-approval-title"
+            style={{ width: 'min(100% - 32px, 680px)', maxHeight: 'min(92vh, 820px)', overflowY: 'auto' }}
+          >
+            <div className="admin-modal-header">
+              <div className="admin-modal-icon admin-modal-icon--published" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 6h16v12H4z" /><path d="m4 7 8 6 8-6" />
+                </svg>
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <h3 id="registration-approval-title" className="admin-modal-title">
+                  {locale === 'vi' ? 'Duyệt và liên kết email Workspace' : 'Approve and link Workspace email'}
+                </h3>
+                <p className="admin-modal-subtitle">
+                  {locale === 'vi' ? 'Chỉ liên kết mailbox đã được admin tạo sẵn; duyệt không tạo email hay đổi mật khẩu.' : 'Only an existing mailbox can be linked. Approval will not create an email account or change its password.'}
+                </p>
+              </div>
+              <button type="button" className="admin-modal-close" onClick={() => !busyId && setApprovalModal(null)} aria-label={locale === 'vi' ? 'Đóng' : 'Close'} disabled={Boolean(busyId)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'grid', gap: 16 }}>
+              <div role="note" style={{ display: 'flex', gap: 10, padding: '12px 14px', border: '1px solid #bfdbfe', borderRadius: 8, background: '#eff6ff', color: '#1e40af', fontSize: 13, lineHeight: 1.5 }}>
+                <span aria-hidden="true">ⓘ</span>
+                <span>{locale === 'vi'
+                  ? `Nhập email chính đang hoạt động trong Google Workspace (${process.env.NEXT_PUBLIC_GOOGLE_WORKSPACE_DOMAIN || 'hyperdatalab.org'}). Nếu mailbox chưa có, hãy tạo ở mục Quản lý tài khoản → Google Workspace trước. Hệ thống chỉ gửi hướng dẫn đăng nhập đến email cá nhân bên dưới; không tạo mailbox hoặc đổi mật khẩu.`
+                  : `Enter an active primary Google Workspace address (${process.env.NEXT_PUBLIC_GOOGLE_WORKSPACE_DOMAIN || 'hyperdatalab.org'}). If the mailbox does not exist yet, create it first under Account Management → Google Workspace. The system only emails sign-in instructions to the personal contact below; it will not create a mailbox or change a password.`}</span>
+              </div>
+              <label style={{ display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 600 }}>
+                {locale === 'vi' ? 'Email cá nhân đăng ký' : 'Registered personal email'}
+                <input value={approvalModal.applicant.email} readOnly type="email" style={approvalInputStyle} />
+                <span style={{ fontSize: 12, fontWeight: 400, color: '#64748b' }}>{locale === 'vi' ? 'Chỉ nhận hướng dẫn đăng nhập; mailbox Workspace mới là email dùng để đăng nhập ứng dụng.' : 'Receives sign-in instructions only; the Workspace mailbox is used to sign in to the application.'}</span>
+              </label>
+              <label style={{ display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 600 }}>
+                <span>{locale === 'vi' ? 'Email Workspace đã có sẵn' : 'Existing Workspace email'} <span style={{ color: '#dc2626' }}>*</span></span>
+                <input required type="email" autoComplete="off" placeholder={`name@${process.env.NEXT_PUBLIC_GOOGLE_WORKSPACE_DOMAIN || 'hyperdatalab.org'}`} value={approvalModal.workspaceEmail} onChange={(event) => setApprovalModal((current) => current ? { ...current, workspaceEmail: event.target.value } : current)} style={approvalInputStyle} />
+                <span style={{ fontSize: 12, fontWeight: 400, color: '#64748b' }}>{locale === 'vi' ? 'Phải là email chính của mailbox đang hoạt động; không dùng email bí danh.' : 'Must be the primary email of an active mailbox; aliases are not accepted.'}</span>
+              </label>
+              <div style={approvalTwoColumnStyle}>
+                <label style={approvalLabelStyle}><span>{locale === 'vi' ? 'Tên' : 'First name'} <span style={{ color: '#dc2626' }}>*</span></span>
+                  <input required maxLength={100} value={approvalModal.firstName} onChange={(event) => setApprovalModal((current) => current ? { ...current, firstName: event.target.value } : current)} style={approvalInputStyle} />
+                </label>
+                <label style={approvalLabelStyle}><span>{locale === 'vi' ? 'Họ và tên đệm' : 'Last name'} <span style={{ color: '#dc2626' }}>*</span></span>
+                  <input required maxLength={100} value={approvalModal.lastName} onChange={(event) => setApprovalModal((current) => current ? { ...current, lastName: event.target.value } : current)} style={approvalInputStyle} />
+                </label>
+              </div>
+              <div style={approvalTwoColumnStyle}>
+                <label style={approvalLabelStyle}>{locale === 'vi' ? 'Mã sinh viên' : 'Student ID'}
+                  <input maxLength={50} value={approvalModal.studentId} onChange={(event) => setApprovalModal((current) => current ? { ...current, studentId: event.target.value } : current)} style={approvalInputStyle} />
+                </label>
+                <label style={approvalLabelStyle}>{locale === 'vi' ? 'Ngành / Khoa' : 'Major / Department'}
+                  <input maxLength={120} value={approvalModal.major} onChange={(event) => setApprovalModal((current) => current ? { ...current, major: event.target.value } : current)} style={approvalInputStyle} />
+                </label>
+              </div>
+              <div style={{ fontSize: 13, color: '#475569' }}>
+                {locale === 'vi' ? 'Vai trò hồ sơ:' : 'Profile role:'}{' '}
+                <strong>{approvalModal.applicant.role === 'ADMIN' ? 'Admin' : approvalModal.applicant.role === 'LECTURER' ? (locale === 'vi' ? 'Giảng viên' : 'Lecturer') : (locale === 'vi' ? 'Sinh viên' : 'Student')}</strong>
+              </div>
+              {approvalError && <div role="alert" style={{ padding: '11px 13px', border: '1px solid #fecaca', borderRadius: 8, color: '#b91c1c', background: '#fef2f2', fontSize: 13 }}>{approvalError}</div>}
+            </div>
+            <div className="admin-modal-footer">
+              <button type="button" className="admin-btn-cancel" onClick={() => setApprovalModal(null)} disabled={Boolean(busyId)}>{locale === 'vi' ? 'Hủy' : 'Cancel'}</button>
+              <button type="submit" className="admin-btn-confirm admin-btn-confirm--published" disabled={Boolean(busyId) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(approvalModal.workspaceEmail.trim()) || !approvalModal.firstName.trim() || !approvalModal.lastName.trim()}>
+                {busyId ? (locale === 'vi' ? 'Đang xác minh và liên kết…' : 'Verifying and linking…') : (locale === 'vi' ? 'Duyệt và liên kết' : 'Approve and link')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {confirmModal && confirmModal.open && (
         <div className="admin-modal-backdrop" onClick={() => !busyId && setConfirmModal(null)}>

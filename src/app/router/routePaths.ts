@@ -7,9 +7,6 @@ export const ROUTES = {
   REGISTER: '/#register-section',
   AUTH: {
     LOGIN: '/login',
-    LOGOUT: '/api/auth/logout',
-    ME: '/api/auth/me',
-    CALLBACK: '/auth/callback',
   },
   ADMIN: {
     ROOT: '/admin',

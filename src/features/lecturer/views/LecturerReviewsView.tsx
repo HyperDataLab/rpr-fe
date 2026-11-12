@@ -171,7 +171,7 @@ export function LecturerReviewsView() {
   return (
     <LecturerShell active="reviews" title={locale === 'vi' ? 'Hàng đợi thẩm định' : 'Review queue'} pendingCount={pendingCount}>
       {/* Filter Toolbar with Integrated Counts, Search, and Sort */}
-      <div className="student-filter-toolbar">
+      <div className="student-filter-toolbar lecturer-reviews-filter-toolbar">
         {/* Status Tab Pills */}
         <div className="student-tabs-pills" role="tablist" aria-label="Filter review queue">
           <button

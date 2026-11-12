@@ -1,0 +1,450 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function profilePath(uid) {
+      return /databases/$(database)/documents/userProfiles/$(uid);
+    }
+
+    function hasProfile(uid) {
+      return exists(profilePath(uid));
+    }
+
+    function profile(uid) {
+      return get(profilePath(uid)).data;
+    }
+
+    function activeUser() {
+      return signedIn()
+        && hasProfile(request.auth.uid)
+        && profile(request.auth.uid).isActive == true
+        && profile(request.auth.uid).status == 'APPROVED'
+        && (!('workspaceEmail' in profile(request.auth.uid))
+          || request.auth.token.firebase.sign_in_provider == 'custom');
+    }
+
+    function roleIs(role) {
+      return activeUser() && profile(request.auth.uid).role == role;
+    }
+
+    function isAdmin() {
+      return roleIs('ADMIN');
+    }
+
+    function publicationPath(publicationId) {
+      return /databases/$(database)/documents/publications/$(publicationId);
+    }
+
+    function hasPublication(publicationId) {
+      return exists(publicationPath(publicationId));
+    }
+
+    function publication(publicationId) {
+      return get(publicationPath(publicationId)).data;
+    }
+
+    function hasPublicationAfter(publicationId) {
+      return existsAfter(publicationPath(publicationId));
+    }
+
+    function publicationAfter(publicationId) {
+      return getAfter(publicationPath(publicationId)).data;
+    }
+
+    function isUploaderAfter(publicationId) {
+      return activeUser()
+        && hasPublicationAfter(publicationId)
+        && publicationAfter(publicationId).uploaderId == request.auth.uid;
+    }
+
+    function canCreatePublicationContent(publicationId) {
+      return isUploaderAfter(publicationId)
+        && (publicationAfter(publicationId).status == 'DRAFTING'
+          || (!exists(publicationPath(publicationId))
+            && publicationAfter(publicationId).status == 'REVIEWING'));
+    }
+
+    function canCreatePublicationVersion(publicationId, versionId) {
+      return isUploaderAfter(publicationId)
+        && ((publicationAfter(publicationId).status == 'DRAFTING'
+            && publicationAfter(publicationId).currentVersionId == versionId)
+          || (!exists(publicationPath(publicationId))
+            && publicationAfter(publicationId).status == 'REVIEWING'));
+    }
+
+    function isUploaderForVersion(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return activeUser() && exists(versionPath) && isUploader(get(versionPath).data.publicationId);
+    }
+
+    function isUploaderForVersionAfter(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return activeUser() && existsAfter(versionPath) && isUploaderAfter(getAfter(versionPath).data.publicationId);
+    }
+
+    function ownerCanEditVersionAuthors(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return activeUser()
+        && exists(versionPath)
+        && isUploader(get(versionPath).data.publicationId)
+        && publication(get(versionPath).data.publicationId).status == 'DRAFTING'
+        && publication(get(versionPath).data.publicationId).currentVersionId == versionId;
+    }
+
+    function ownerCanDeleteDraftVersionAuthors(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return exists(versionPath) && draftOwnedByCaller(get(versionPath).data.publicationId);
+    }
+
+    function ownerCanCreateVersionAuthors(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return activeUser()
+        && existsAfter(versionPath)
+        && getAfter(versionPath).data.createdById == request.auth.uid
+        && canCreatePublicationVersion(getAfter(versionPath).data.publicationId, versionId)
+        && (publicationAfter(getAfter(versionPath).data.publicationId).status != 'PUBLISHED'
+          || !exists(versionPath));
+    }
+
+    function canReadVersionAuthor(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return exists(versionPath) && canReadPublicationAuthors(get(versionPath).data.publicationId);
+    }
+
+    function ownerCanSubmitVersion(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      let publicationId = resource.data.publicationId;
+      return activeUser()
+        && exists(versionPath)
+        && isUploader(publicationId)
+        && publication(publicationId).status == 'DRAFTING'
+        && publication(publicationId).currentVersionId == versionId
+        && getAfter(publicationPath(publicationId)).data.status == 'REVIEWING'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['submittedAt', 'updatedAt']);
+    }
+
+    function ownerCanEditCurrentVersion(versionId) {
+      let versionPath = /databases/$(database)/documents/publicationVersions/$(versionId);
+      return activeUser()
+        && exists(versionPath)
+        && isUploader(resource.data.publicationId)
+        && publication(resource.data.publicationId).status == 'DRAFTING'
+        && publication(resource.data.publicationId).currentVersionId == versionId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'abstract', 'doi', 'publicationDate', 'keywords', 'discipline', 'updatedAt'
+        ]);
+    }
+
+    function isUploader(publicationId) {
+      return activeUser()
+        && hasPublication(publicationId)
+        && publication(publicationId).uploaderId == request.auth.uid;
+    }
+
+    function isAssignedReviewer(publicationId) {
+      return activeUser()
+        && hasPublication(publicationId)
+        && exists(/databases/$(database)/documents/publicationReviews/$(publicationId + '__' + request.auth.uid + '__' + publication(publicationId).reviewRound));
+    }
+
+    function isPrimaryReviewer(publicationId) {
+      return activeUser()
+        && hasPublication(publicationId)
+        && exists(/databases/$(database)/documents/publicationReviews/$(publicationId + '__' + request.auth.uid + '__' + publication(publicationId).reviewRound))
+        && get(/databases/$(database)/documents/publicationReviews/$(publicationId + '__' + request.auth.uid + '__' + publication(publicationId).reviewRound)).data.assignmentRole == 'PRIMARY';
+    }
+
+    function canReadPublication(publicationId) {
+      return hasPublication(publicationId)
+        && ((publication(publicationId).status == 'PUBLISHED'
+            && publication(publicationId).isPrivate != true
+            && publication(publicationId).audiences is list
+            && publication(publicationId).audiences.hasAny(['GUEST']))
+          || (activeUser()
+            && (isAdmin()
+              || isUploader(publicationId)
+              || isAssignedReviewer(publicationId)
+              || (publication(publicationId).status == 'PUBLISHED'
+                && publication(publicationId).isPrivate != true
+                && publication(publicationId).audiences is list
+                && ((profile(request.auth.uid).role == 'STUDENT' && publication(publicationId).audiences.hasAny(['STUDENT']))
+                  || (profile(request.auth.uid).role == 'LECTURER' && publication(publicationId).audiences.hasAny(['LECTURER'])))))));
+    }
+
+    function canReadPublicationAuthors(publicationId) {
+      return hasPublication(publicationId)
+        && (isAdmin()
+          || (activeUser() && isUploader(publicationId))
+          || (publication(publicationId).status == 'PUBLISHED'
+            && publication(publicationId).isPrivate != true
+            && publication(publicationId).audiences is list
+            && (publication(publicationId).audiences.hasAny(['GUEST'])
+              || (activeUser()
+                && ((profile(request.auth.uid).role == 'STUDENT' && publication(publicationId).audiences.hasAny(['STUDENT']))
+                  || (profile(request.auth.uid).role == 'LECTURER' && publication(publicationId).audiences.hasAny(['LECTURER'])))))));
+    }
+
+    function draftOwnedByCaller(publicationId) {
+      return isUploader(publicationId) && publication(publicationId).status == 'DRAFTING';
+    }
+
+    function ownerSubmissionTransition(publicationId) {
+      let currentRound = resource.data.reviewRound;
+      return draftOwnedByCaller(publicationId)
+        && request.resource.data.status == 'REVIEWING'
+        && currentRound is int
+        && request.resource.data.reviewRound == currentRound + 1
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.discipline is string
+        && request.resource.data.discipline.size() > 0
+        && request.resource.data.isPrivate == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewRound', 'updatedAt']);
+    }
+
+    function lecturerPrivateModeUpdate(publicationId) {
+      return roleIs('LECTURER')
+        && isUploader(publicationId)
+        && publication(publicationId).status == 'DRAFTING'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isPrivate', 'updatedAt']);
+    }
+
+    function carryForwardReviewerAssignment() {
+      let publicationId = request.resource.data.publicationId;
+      let reviewerId = request.resource.data.reviewerId;
+      let previousRound = publication(publicationId).reviewRound;
+      let previousAssignmentPath = /databases/$(database)/documents/publicationReviews/$(publicationId + '__' + reviewerId + '__' + previousRound);
+      return activeUser()
+        && hasPublication(publicationId)
+        && publication(publicationId).uploaderId == request.auth.uid
+        && publication(publicationId).status == 'DRAFTING'
+        && publicationAfter(publicationId).status == 'REVIEWING'
+        && publicationAfter(publicationId).reviewRound == previousRound + 1
+        && exists(previousAssignmentPath)
+        && get(previousAssignmentPath).data.reviewerId == reviewerId
+        && get(previousAssignmentPath).data.publicationId == publicationId
+        && get(previousAssignmentPath).data.round == previousRound
+        && get(previousAssignmentPath).data.assignmentRole in ['PRIMARY', 'SECONDARY']
+        && request.resource.data.assignmentRole == get(previousAssignmentPath).data.assignmentRole
+        && request.resource.data.round == publicationAfter(publicationId).reviewRound
+        && request.resource.data.versionId == publicationAfter(publicationId).currentVersionId
+        && request.resource.data.id == reviewIdFor(publicationId, reviewerId, request.resource.data.round)
+        && request.resource.data.comment == null
+        && request.resource.data.recommendation == null
+        && request.resource.data.submittedAt == null
+        && request.resource.data.keys().hasOnly([
+          'id', 'publicationId', 'reviewerId', 'versionId', 'round', 'assignmentRole',
+          'comment', 'recommendation', 'submittedAt', 'createdAt', 'updatedAt'
+        ]);
+    }
+
+    function reviewIdFor(publicationId, reviewerId, round) {
+      return publicationId + '__' + reviewerId + '__' + round;
+    }
+
+    function publishedOwnerMetadataUpdate(publicationId) {
+      return isUploader(publicationId)
+        && resource.data.status == 'PUBLISHED'
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.uploaderId == resource.data.uploaderId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'abstract', 'doi', 'publicationDate', 'keywords', 'discipline', 'updatedAt'
+        ]);
+    }
+
+    // `users` contains legacy password hashes and must never be exposed to clients.
+    match /users/{uid} {
+      allow read, write: if false;
+    }
+
+    // The new client-safe identity collection never stores credentials.
+    match /userProfiles/{uid} {
+      allow get: if ownUser(uid) || isAdmin();
+      allow list: if isAdmin();
+      // User profiles are created by the trusted Worker only after admin approval.
+      allow create: if false;
+      allow update: if isAdmin()
+        || (ownUser(uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'firstName', 'lastName', 'studentId', 'major', 'affiliation', 'avatarUrl', 'updatedAt'
+          ])
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.isActive == resource.data.isActive);
+      allow delete: if isAdmin();
+    }
+
+    match /registrationRequests/{requestId} {
+      allow create: if request.resource.data.keys().hasOnly([
+          'email', 'firstName', 'lastName', 'studentId', 'major', 'phone', 'status', 'createdAt'
+        ])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.firstName is string
+        && request.resource.data.firstName.size() <= 100
+        && request.resource.data.lastName is string
+        && request.resource.data.lastName.size() <= 100
+        && request.resource.data.studentId is string
+        && request.resource.data.studentId.size() <= 50
+        && request.resource.data.major is string
+        && request.resource.data.major.size() <= 120
+        && request.resource.data.status == 'PENDING';
+      allow get, list: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'reviewedAt', 'reviewedById', 'rejectionReason'
+        ]);
+      allow delete: if isAdmin();
+    }
+
+    match /publications/{publicationId} {
+      allow get: if canReadPublication(publicationId);
+      allow list: if isAdmin();
+      allow list: if activeUser() && resource.data.uploaderId == request.auth.uid;
+      allow list: if resource.data.status == 'PUBLISHED'
+        && resource.data.isPrivate == false
+        && ('GUEST' in resource.data.audiences);
+      allow list: if activeUser()
+        && resource.data.status == 'PUBLISHED'
+        && resource.data.isPrivate == false
+        && ((profile(request.auth.uid).role == 'STUDENT' && ('STUDENT' in resource.data.audiences))
+          || (profile(request.auth.uid).role == 'LECTURER' && ('LECTURER' in resource.data.audiences)));
+      allow create: if activeUser()
+        && request.resource.data.id == publicationId
+        && request.resource.data.uploaderId == request.auth.uid
+        && request.resource.data.status in ['PROCESSING', 'DRAFTING', 'REVIEWING']
+        && request.resource.data.isPrivate is bool
+        && (!request.resource.data.isPrivate || profile(request.auth.uid).role == 'LECTURER')
+        && request.resource.data.audiences is list
+        && (request.resource.data.status != 'REVIEWING'
+          || (request.resource.data.title is string
+            && request.resource.data.title.size() > 0
+            && request.resource.data.discipline is string
+            && request.resource.data.discipline.size() > 0
+            && request.resource.data.isPrivate == false));
+      allow update: if isAdmin()
+        || (draftOwnedByCaller(publicationId)
+          && request.resource.data.uploaderId == resource.data.uploaderId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'title', 'abstract', 'doi', 'publicationDate', 'keywords', 'fileSize', 'rawTeiXml',
+            'discipline', 'audiences', 'updatedAt', 'currentVersionId', 'reviewRound'
+          ]))
+        || lecturerPrivateModeUpdate(publicationId)
+        || publishedOwnerMetadataUpdate(publicationId)
+        || ownerSubmissionTransition(publicationId)
+        || (roleIs('LECTURER')
+          && isPrimaryReviewer(publicationId)
+          && resource.data.status == 'REVIEWING'
+          && request.resource.data.status in ['PUBLISHED', 'DRAFTING', 'REJECTED']
+          && request.resource.data.uploaderId == resource.data.uploaderId
+          && request.resource.data.isPrivate == resource.data.isPrivate
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'updatedAt'
+          ]));
+      allow delete: if isAdmin() || draftOwnedByCaller(publicationId);
+    }
+
+    match /publicationReviews/{reviewId} {
+      allow get, list: if isAdmin()
+        || (activeUser() && resource.data.reviewerId == request.auth.uid)
+        || isUploader(resource.data.publicationId)
+        || isPrimaryReviewer(resource.data.publicationId);
+      // Admins create the assignment document; reviewers may only submit it.
+      allow create: if isAdmin() || carryForwardReviewerAssignment();
+      allow update: if isAdmin()
+        || (activeUser()
+          && resource.data.reviewerId == request.auth.uid
+          && resource.data.assignmentRole in ['PRIMARY', 'SECONDARY']
+          && hasPublication(resource.data.publicationId)
+          && publication(resource.data.publicationId).status == 'REVIEWING'
+          && resource.data.round == publication(resource.data.publicationId).reviewRound
+          && reviewId == resource.data.publicationId + '__' + request.auth.uid + '__' + resource.data.round
+          && resource.data.submittedAt == null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'comment', 'recommendation', 'submittedAt', 'updatedAt'
+          ])
+          && request.resource.data.comment is string
+          && request.resource.data.recommendation in ['PUBLISH', 'NEEDS_REVISION', 'REJECT']);
+      allow delete: if isAdmin() || draftOwnedByCaller(resource.data.publicationId);
+    }
+
+    match /publicationVersions/{versionId} {
+      allow get, list: if isAdmin() || canReadPublication(resource.data.publicationId);
+      allow create: if activeUser()
+        && request.resource.data.createdById == request.auth.uid
+        && canCreatePublicationVersion(request.resource.data.publicationId, versionId)
+        && request.resource.data.versionNumber is int
+        && request.resource.data.versionNumber > 0;
+      allow update: if isAdmin() || ownerCanSubmitVersion(versionId) || ownerCanEditCurrentVersion(versionId);
+      allow delete: if isAdmin() || draftOwnedByCaller(resource.data.publicationId);
+    }
+
+    match /publicationVersionAuthors/{linkId} {
+      allow get, list: if isAdmin() || canReadVersionAuthor(resource.data.publicationVersionId);
+      allow create: if isAdmin()
+        || (activeUser()
+          && request.resource.data.publicationVersionId is string
+          && ownerCanCreateVersionAuthors(request.resource.data.publicationVersionId));
+      allow update: if isAdmin()
+        || (ownerCanEditVersionAuthors(resource.data.publicationVersionId)
+          && request.resource.data.publicationVersionId == resource.data.publicationVersionId);
+      allow delete: if isAdmin()
+        || ownerCanDeleteDraftVersionAuthors(resource.data.publicationVersionId);
+    }
+
+    match /publicationAuthors/{linkId} {
+      allow get, list: if isAdmin() || canReadPublicationAuthors(resource.data.publicationId);
+      allow create: if isAdmin() || canCreatePublicationContent(request.resource.data.publicationId);
+      allow update: if isAdmin()
+        || (draftOwnedByCaller(resource.data.publicationId)
+          && request.resource.data.publicationId == resource.data.publicationId);
+      allow delete: if isAdmin() || draftOwnedByCaller(resource.data.publicationId);
+    }
+
+    match /authors/{authorId} {
+      // Author PII is denormalized onto the per-publication link documents.
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /publicationEvents/{eventId} {
+      allow get, list: if isAdmin() || canReadPublication(resource.data.publicationId);
+      allow create: if activeUser()
+        && request.resource.data.actorId == request.auth.uid
+        && (isAdmin() || isUploaderAfter(request.resource.data.publicationId) || isAssignedReviewer(request.resource.data.publicationId));
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || draftOwnedByCaller(resource.data.publicationId);
+    }
+
+    match /notifications/{notificationId} {
+      allow get, list: if activeUser() && resource.data.userId == request.auth.uid;
+      allow create: if isAdmin()
+        || (activeUser() && request.resource.data.userId == request.auth.uid);
+      allow update: if activeUser()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+        && request.resource.data.isRead is bool;
+      allow delete: if isAdmin() || (activeUser() && resource.data.userId == request.auth.uid);
+    }
+
+    // Legacy session, password-reset, and registration-attempt records are server-only.
+    match /sessions/{document=**} { allow read, write: if false; }
+    match /passwordResetTokens/{document=**} { allow read, write: if false; }
+    match /registrationAttempts/{document=**} { allow read, write: if false; }
+
+    // Default deny: every collection must receive an explicit rule above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -11,6 +11,8 @@ import { useTranslation } from '@/i18n';
 import { ExpandableAbstract } from '@/shared/components';
 import { Skeleton, PublishedPaperCardSkeleton } from '@/components/skeleton';
 import dynamic from 'next/dynamic';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { firestoreDb } from '@/lib/firebase/client';
 
 const NativePdfViewer = dynamic(
   () => import('../components/NativePdfViewer').then((mod) => mod.NativePdfViewer),
@@ -45,6 +47,84 @@ export type PublicPublication = {
   viewCount?: number;
 };
 
+function toIso(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    return (value.toDate as () => Date)().toISOString();
+  }
+  return null;
+}
+
+function workerDownloadUrl(objectKey: unknown, publicationId: string) {
+  if (typeof objectKey !== 'string' || !objectKey) return undefined;
+  const worker = process.env.NEXT_PUBLIC_R2_WORKER_URL?.replace(/\/$/, '');
+  if (!worker) return undefined;
+  const url = new URL(`${worker}/r2/object`);
+  url.searchParams.set('key', objectKey);
+  url.searchParams.set('publicationId', publicationId);
+  return url.toString();
+}
+
+export async function loadPublicPublication(id: string): Promise<PublicPublication | null> {
+  const db = firestoreDb();
+  const snapshot = await getDoc(doc(db, 'publications', id));
+  if (!snapshot.exists()) return null;
+  const publication = snapshot.data();
+  const audiences = Array.isArray(publication.audiences) ? publication.audiences : [];
+  if (publication.status !== 'PUBLISHED' || publication.isPrivate === true || !audiences.includes('GUEST')) return null;
+
+  const [currentVersionSnapshot, authorLinksSnapshot] = await Promise.all([
+    publication.currentVersionId
+      ? getDoc(doc(db, 'publicationVersions', String(publication.currentVersionId)))
+      : Promise.resolve(null),
+    getDocs(query(collection(db, 'publicationAuthors'), where('publicationId', '==', id))),
+  ]);
+  const version = currentVersionSnapshot?.exists() ? currentVersionSnapshot.data() : null;
+  const authors = authorLinksSnapshot.docs
+    .map((authorDoc) => authorDoc.data())
+    .sort((a, b) => Number(a.orderIndex || 0) - Number(b.orderIndex || 0))
+    .map((author) => ({
+      name: String(author.name || ''),
+      affiliation: typeof author.affiliation === 'string' ? author.affiliation : null,
+      isPrimary: author.isPrimary === true,
+      isCorresponding: author.isCorresponding === true,
+      email: typeof author.email === 'string' ? author.email : undefined,
+    }))
+    .filter((author) => author.name);
+  const publishedAt = toIso(publication.publicationDate) || toIso(publication.updatedAt) || toIso(publication.createdAt);
+  const objectKey = version?.objectKey || publication.objectKey;
+  const versionNumber = Number(version?.versionNumber || 1);
+
+  return {
+    id: snapshot.id,
+    title: typeof publication.title === 'string' ? publication.title : null,
+    abstract: typeof publication.abstract === 'string' ? publication.abstract : null,
+    discipline: typeof publication.discipline === 'string' ? publication.discipline : null,
+    keywords: Array.isArray(publication.keywords) ? publication.keywords.filter((item: unknown): item is string => typeof item === 'string') : [],
+    publishedAt,
+    currentVersion: {
+      versionLabel: `v${versionNumber}`,
+      fileName: String(version?.fileName || String(objectKey || '').split('/').pop() || 'publication.pdf'),
+    },
+    authors,
+    downloadUrl: workerDownloadUrl(objectKey, snapshot.id),
+  };
+}
+
+export async function listPublicPublications(): Promise<PublicPublication[]> {
+  const db = firestoreDb();
+  const publications = await getDocs(query(
+    collection(db, 'publications'),
+    where('status', '==', 'PUBLISHED'),
+    where('isPrivate', '==', false),
+    where('audiences', 'array-contains', 'GUEST'),
+  ));
+  const rows = await Promise.all(publications.docs.map((item) => loadPublicPublication(item.id)));
+  return rows.filter((item): item is PublicPublication => item !== null)
+    .sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
+}
+
 export function StudentPublishedView() {
   const { t, locale } = useTranslation();
   const router = useRouter();
@@ -56,10 +136,7 @@ export function StudentPublishedView() {
   const { data: serverItems = [], isLoading: loading, error: queryError } = useQuery<PublicPublication[], Error>({
     queryKey: ['public-publications'],
     queryFn: async () => {
-      const response = await fetch('/api/publications/public');
-      const body = await response.json();
-      if (!response.ok) throw new Error(body?.error?.message || 'Unable to load published papers.');
-      return Array.isArray(body.data) ? body.data : (body.data?.items || []);
+      return listPublicPublications();
     },
     staleTime: 5 * 60 * 1000, // 5 minutes fresh
     gcTime: 15 * 60 * 1000,
@@ -113,20 +190,15 @@ export function StudentPublishedView() {
   }, [selected]);
 
   useEffect(() => {
-    if (serverItems.length > 0) setItems(serverItems);
+    setItems(serverItems);
   }, [serverItems]);
 
   const handleSelectPaper = async (paper: PublicPublication) => {
     setSelected(paper);
     setModalTab('overview');
     try {
-      const res = await fetch(`/api/publications/public/${paper.id}`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data?.downloadUrl) {
-          setSelected((prev) => (prev && prev.id === paper.id ? { ...prev, downloadUrl: json.data.downloadUrl } : prev));
-        }
-      }
+      const detail = await loadPublicPublication(paper.id);
+      if (detail?.downloadUrl) setSelected((prev) => (prev && prev.id === paper.id ? detail : prev));
     } catch {
       // keep basic paper data if detail fetch fails
     }

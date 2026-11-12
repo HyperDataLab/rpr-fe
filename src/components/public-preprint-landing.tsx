@@ -7,6 +7,7 @@ import { PublicPortalShowcase } from './public-portal-showcase';
 import { ScrollRevealObserver } from './scroll-reveal';
 import { useTranslation } from '@/i18n';
 import { smoothScrollTo } from '@/app/providers/SmoothScrollProvider';
+import { authApi } from '@/features/auth/api/authApi';
 
 // Helper for Vietnamese diacritic removal for live username preview
 const VIETNAMESE_MAP: Record<string, string> = {
@@ -56,7 +57,7 @@ export default function PublicPreprintLanding() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successData, setSuccessData] = useState<{ username: string; email: string; name: string } | null>(null);
+  const [successData, setSuccessData] = useState<{ email: string; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
@@ -77,18 +78,14 @@ export default function PublicPreprintLanding() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await authApi.register({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           studentId: studentId.trim().toUpperCase(),
           email: email.trim(),
           phone: phone.trim() || undefined,
           major: major.trim(),
-        }),
-      });
+      }).then((data) => new Response(JSON.stringify(data), { status: 201 }));
 
       const data = await res.json();
 
@@ -99,12 +96,11 @@ export default function PublicPreprintLanding() {
       }
 
       setSuccessData({
-        username: data.user.username,
         email: data.user.email,
         name: data.user.name,
       });
-    } catch {
-      setError('Không thể kết nối đến máy chủ.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to submit the registration request.');
     } finally {
       setLoading(false);
     }
@@ -295,13 +291,9 @@ export default function PublicPreprintLanding() {
 
                     {/* Clean, perfectly proportioned actions */}
                     <div className="auth-success-actions">
-                      <Link href="/login" className="auth-btn-success-primary">
-                        <span>Đến Trang Đăng Nhập</span>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <line x1="5" y1="12" x2="19" y2="12" />
-                          <polyline points="12 5 19 12 12 19" />
-                        </svg>
-                      </Link>
+                      <p className="auth-subtitle" style={{ fontSize: 13, color: '#647381', margin: '0 0 14px', lineHeight: 1.5 }}>
+                        {'Ch\u01b0a t\u1ea1o t\u00e0i kho\u1ea3n \u0111\u0103ng nh\u1eadp. B\u1ea1n ch\u1ec9 c\u00f3 th\u1ec3 \u0111\u0103ng nh\u1eadp sau khi Ban Qu\u1ea3n tr\u1ecb duy\u1ec7t h\u1ed3 s\u01a1 v\u00e0 li\u00ean k\u1ebft email Workspace.'}
+                      </p>
 
                       <button
                         type="button"

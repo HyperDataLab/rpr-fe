@@ -1,174 +1,121 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { notificationApi } from '../api/notificationApi';
-import { AppNotification, ListNotificationsResponse } from '../types/notification';
+import type { ListNotificationsResponse } from '../types/notification';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 export const NOTIFICATIONS_LIST_QUERY_KEY = ['notifications-list'];
 export const UNREAD_COUNT_QUERY_KEY = ['notifications-unread-count'];
 
 export function useNotifications(options: { page?: number; limit?: number; autoConnect?: boolean } = {}) {
   const { page = 1, limit = 20, autoConnect = true } = options;
+  const { user, loading: authLoading } = useAuth();
   const queryClient = useQueryClient();
   const [hasNewArrival, setHasNewArrival] = useState(false);
+  const newArrivalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uid = user?.id;
+  const unreadKey = useMemo(() => [...UNREAD_COUNT_QUERY_KEY, uid || 'signed-out'], [uid]);
+  const listKey = useMemo(() => [...NOTIFICATIONS_LIST_QUERY_KEY, uid || 'signed-out', { page, limit }], [uid, page, limit]);
 
-  // 1. Fetch unread count (initial load once, real-time updates pushed via SSE)
   const { data: unreadCount = 0 } = useQuery({
-    queryKey: UNREAD_COUNT_QUERY_KEY,
-    queryFn: () => notificationApi.getUnreadCount(),
+    queryKey: unreadKey,
+    queryFn: () => notificationApi.getUnreadCount(uid),
+    enabled: Boolean(uid) && !authLoading,
     staleTime: Infinity,
     refetchInterval: false,
     refetchOnWindowFocus: false,
   });
 
-  // 2. Fetch notifications list (initial load once, real-time items pushed via SSE)
   const {
     data: listData,
-    isLoading,
+    isLoading: listLoading,
     isError,
     refetch,
   } = useQuery({
-    queryKey: [...NOTIFICATIONS_LIST_QUERY_KEY, { page, limit }],
-    queryFn: () => notificationApi.listNotifications({ page, limit }),
+    queryKey: listKey,
+    queryFn: () => notificationApi.listNotifications({ page, limit, userId: uid }),
+    enabled: Boolean(uid) && !authLoading,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
 
-  // 3. Mutation: Mark single as read
   const markReadMutation = useMutation({
     mutationFn: (id: string) => notificationApi.markAsRead(id),
-    onMutate: async (id: string) => {
-      // Optimistically update list
-      queryClient.setQueriesData({ queryKey: NOTIFICATIONS_LIST_QUERY_KEY }, (old: ListNotificationsResponse | undefined) => {
-        if (!old) return old;
-        return {
-          ...old,
-          unreadCount: Math.max(0, old.unreadCount - 1),
-          items: old.items.map((item) => (item.id === id ? { ...item, isRead: true } : item)),
-        };
-      });
-
-      // Optimistically update unread count
-      queryClient.setQueryData(UNREAD_COUNT_QUERY_KEY, (prev: number | undefined) => Math.max(0, (prev || 0) - 1));
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: [...NOTIFICATIONS_LIST_QUERY_KEY, uid || 'signed-out'] });
+      const old = queryClient.getQueryData<ListNotificationsResponse>(listKey);
+      queryClient.setQueryData<ListNotificationsResponse>(listKey, (current) => current && ({
+        ...current,
+        unreadCount: Math.max(0, current.unreadCount - (current.items.some((item) => item.id === id && !item.isRead) ? 1 : 0)),
+        items: current.items.map((item) => item.id === id ? { ...item, isRead: true } : item),
+      }));
+      queryClient.setQueryData<number>(unreadKey, (count) => Math.max(0, (count || 0) - 1));
+      return { old };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.old) queryClient.setQueryData(listKey, context.old);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: UNREAD_COUNT_QUERY_KEY });
-      queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_LIST_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: unreadKey });
+      queryClient.invalidateQueries({ queryKey: listKey });
     },
   });
 
-  // 4. Mutation: Mark all as read
   const markAllReadMutation = useMutation({
     mutationFn: () => notificationApi.markAllAsRead(),
     onMutate: async () => {
-      queryClient.setQueriesData({ queryKey: NOTIFICATIONS_LIST_QUERY_KEY }, (old: ListNotificationsResponse | undefined) => {
-        if (!old) return old;
-        return {
-          ...old,
-          unreadCount: 0,
-          items: old.items.map((item) => ({ ...item, isRead: true })),
-        };
-      });
-      queryClient.setQueryData(UNREAD_COUNT_QUERY_KEY, 0);
+      await queryClient.cancelQueries({ queryKey: listKey });
+      const old = queryClient.getQueryData<ListNotificationsResponse>(listKey);
+      queryClient.setQueryData<ListNotificationsResponse>(listKey, (current) => current && ({
+        ...current,
+        unreadCount: 0,
+        items: current.items.map((item) => ({ ...item, isRead: true })),
+      }));
+      queryClient.setQueryData(unreadKey, 0);
+      return { old };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.old) queryClient.setQueryData(listKey, context.old);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: UNREAD_COUNT_QUERY_KEY });
-      queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_LIST_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: unreadKey });
+      queryClient.invalidateQueries({ queryKey: listKey });
     },
   });
 
-  // 5. Setup SSE Stream
   useEffect(() => {
-    if (!autoConnect || typeof window === 'undefined') return;
+    if (!autoConnect || !uid || authLoading) return;
+    let firstSnapshot = true;
+    const recentIds = new Set<string>();
 
-    let es: EventSource | null = null;
-    let retryTimer: NodeJS.Timeout | null = null;
-
-    let hasDisconnected = false;
-
-    function connect() {
-      try {
-        es = new EventSource('/api/notifications/stream', { withCredentials: true });
-
-        es.onopen = () => {
-          if (hasDisconnected) {
-            queryClient.invalidateQueries({ queryKey: UNREAD_COUNT_QUERY_KEY });
-            queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_LIST_QUERY_KEY });
-            hasDisconnected = false;
-          }
-        };
-
-        const handleNewNotification = (data: AppNotification) => {
-          setHasNewArrival(true);
-          setTimeout(() => setHasNewArrival(false), 3000);
-
-          // Update query cache immediately
-          queryClient.setQueriesData({ queryKey: NOTIFICATIONS_LIST_QUERY_KEY }, (old: ListNotificationsResponse | undefined) => {
-            if (!old) {
-              return {
-                items: [data],
-                unreadCount: 1,
-                pagination: { page: 1, limit, total: 1, totalPages: 1 },
-              };
-            }
-            // Avoid duplicate items
-            if (old.items.some((item) => item.id === data.id)) return old;
-
-            return {
-              ...old,
-              unreadCount: old.unreadCount + 1,
-              pagination: { ...old.pagination, total: old.pagination.total + 1 },
-              items: [data, ...old.items],
-            };
-          });
-
-          // Increment unread count
-          queryClient.setQueryData(UNREAD_COUNT_QUERY_KEY, (prev: number | undefined) => (prev || 0) + 1);
-        };
-
-        es.addEventListener('notification', (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            handleNewNotification(data);
-          } catch {
-            // Ignore parse errors
-          }
-        });
-
-        es.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            handleNewNotification(data);
-          } catch {
-            // Ignore non-json (ping/connected comments)
-          }
-        };
-
-        es.onerror = () => {
-          hasDisconnected = true;
-          if (es) {
-            es.close();
-            es = null;
-          }
-          // Retry connection after 3 seconds
-          if (retryTimer) clearTimeout(retryTimer);
-          retryTimer = setTimeout(connect, 3000);
-        };
-      } catch {
-        hasDisconnected = true;
-        if (retryTimer) clearTimeout(retryTimer);
-        retryTimer = setTimeout(connect, 3000);
+    const stopList = notificationApi.subscribe(uid, (response, snapshot) => {
+      const hasAdded = !firstSnapshot && snapshot.docChanges().some((change) => change.type === 'added' && !recentIds.has(change.doc.id));
+      snapshot.docs.forEach((item) => recentIds.add(item.id));
+      firstSnapshot = false;
+      queryClient.setQueryData(listKey, response);
+      if (hasAdded) {
+        setHasNewArrival(true);
+        if (newArrivalTimer.current) clearTimeout(newArrivalTimer.current);
+        newArrivalTimer.current = setTimeout(() => setHasNewArrival(false), 3000);
       }
-    }
+    }, () => {
+      queryClient.invalidateQueries({ queryKey: listKey });
+    }, page, limit);
 
-    connect();
+    const stopUnread = notificationApi.subscribeUnreadCount(uid, (count) => {
+      queryClient.setQueryData(unreadKey, count);
+    }, () => {
+      queryClient.invalidateQueries({ queryKey: unreadKey });
+    });
 
     return () => {
-      if (es) es.close();
-      if (retryTimer) clearTimeout(retryTimer);
+      stopList();
+      stopUnread();
+      if (newArrivalTimer.current) clearTimeout(newArrivalTimer.current);
     };
-  }, [autoConnect, limit, queryClient]);
+  }, [autoConnect, authLoading, limit, listKey, page, queryClient, uid, unreadKey]);
 
   const markAsRead = useCallback((id: string) => markReadMutation.mutate(id), [markReadMutation]);
   const markAllAsRead = useCallback(() => markAllReadMutation.mutate(), [markAllReadMutation]);
@@ -177,7 +124,7 @@ export function useNotifications(options: { page?: number; limit?: number; autoC
     notifications: listData?.items || [],
     unreadCount,
     pagination: listData?.pagination,
-    isLoading,
+    isLoading: authLoading || (Boolean(uid) && listLoading),
     isError,
     hasNewArrival,
     refetch,
