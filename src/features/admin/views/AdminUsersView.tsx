@@ -7,6 +7,11 @@ import { adminApi, type AdminUser, type AdminOverview } from '../api';
 import { TableSkeleton } from '@/components/skeleton';
 import { SortDropdown } from '@/components/sort-dropdown';
 import { useTranslation } from '@/i18n';
+import {
+  connectGoogleWorkspace, createWorkspaceProfile, createWorkspaceUser, deleteWorkspaceUser, disconnectGoogleWorkspace,
+  getWorkspaceConnectionStatus, listWorkspaceUsers, restoreWorkspaceUser, suspendWorkspaceUser,
+  type WorkspaceConnectionStatus, type WorkspaceUser,
+} from '../api/workspaceApi';
 
 type AccountRoleTab = 'ALL' | 'STUDENT' | 'LECTURER' | 'ADMIN';
 type ActiveFilter = 'ALL' | 'ACTIVE' | 'INACTIVE';
@@ -41,6 +46,17 @@ export function AdminUsersView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceConnectionStatus | null>(null);
+  const [workspaceUsers, setWorkspaceUsers] = useState<WorkspaceUser[]>([]);
+  const [workspacePage, setWorkspacePage] = useState(1);
+  const [workspacePageTokens, setWorkspacePageTokens] = useState<Array<string | undefined>>([undefined]);
+  const [workspaceNextPageToken, setWorkspaceNextPageToken] = useState<string | null>(null);
+  const [workspaceSearch, setWorkspaceSearch] = useState('');
+  const [workspaceSearchInput, setWorkspaceSearchInput] = useState('');
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceForm, setWorkspaceForm] = useState({ email: '', firstName: '', lastName: '' });
 
   // Create User Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -50,8 +66,8 @@ export function AdminUsersView() {
     studentId: '',
     major: '',
     role: 'STUDENT' as AdminUser['role'],
-    password: '',
   });
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Custom Confirm Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -61,10 +77,73 @@ export function AdminUsersView() {
     confirmLabel: string;
     cancelLabel: string;
     isDanger?: boolean;
+    requiredConfirmation?: string;
     onConfirm: () => Promise<void> | void;
   } | null>(null);
+  const [confirmText, setConfirmText] = useState('');
 
   const PAGE_SIZE = 10;
+  const WORKSPACE_PAGE_SIZE = 5;
+
+  const refreshWorkspace = async (targetPage = workspacePage, pageTokens = workspacePageTokens, search = workspaceSearch) => {
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+    try {
+      const status = await getWorkspaceConnectionStatus();
+      setWorkspaceStatus(status);
+      if (status.connected) {
+        const pageResult = await listWorkspaceUsers({
+          pageSize: WORKSPACE_PAGE_SIZE,
+          pageToken: pageTokens[targetPage - 1],
+          orderBy: 'email',
+          query: search
+            ? search.includes('@')
+              ? `email:${search.toLowerCase().replace(/[^a-z0-9._%+-@]/g, '')}*`
+              : `name:'${search.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+            : undefined,
+        });
+        setWorkspaceUsers(pageResult.users);
+        setWorkspaceNextPageToken(pageResult.nextPageToken);
+      } else {
+        setWorkspaceUsers([]);
+        setWorkspaceNextPageToken(null);
+        setWorkspacePage(1);
+        setWorkspacePageTokens([undefined]);
+      }
+    } catch (reason) {
+      setWorkspaceError(reason instanceof Error ? reason.message : 'Unable to load Workspace accounts.');
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  };
+
+  useEffect(() => { void refreshWorkspace(); }, []);
+
+  const workspaceSearchFirstRender = useRef(true);
+  useEffect(() => {
+    if (workspaceSearchFirstRender.current) {
+      workspaceSearchFirstRender.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const query = workspaceSearchInput.trim();
+      const firstPageTokens: Array<string | undefined> = [undefined];
+      setWorkspaceSearch(query);
+      setWorkspacePage(1);
+      setWorkspacePageTokens(firstPageTokens);
+      setWorkspaceNextPageToken(null);
+      void refreshWorkspace(1, firstPageTokens, query);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [workspaceSearchInput]);
+
+  const runWorkspaceAction = async (action: () => Promise<unknown>) => {
+    setWorkspaceBusy(true);
+    setWorkspaceError(null);
+    try { await action(); await refreshWorkspace(); }
+    catch (reason) { setWorkspaceError(reason instanceof Error ? reason.message : 'Workspace action failed.'); }
+    finally { setWorkspaceBusy(false); }
+  };
 
   // Refresh Overview metrics
   const refreshOverview = () => {
@@ -202,23 +281,25 @@ export function AdminUsersView() {
     });
   };
 
-  // Delete User
+  // Delete application account while preserving the Workspace mailbox.
   const handleDeleteUser = (user: AdminUser) => {
+    setConfirmText('');
     setConfirmModal({
       open: true,
-      title: locale === 'vi' ? 'Xóa người dùng' : 'Delete User',
+      title: locale === 'vi' ? 'Xóa tài khoản ứng dụng' : 'Delete application account',
       description: locale === 'vi'
-        ? `Xác nhận xóa vĩnh viễn tài khoản ${user.email}? Hành động này không thể hoàn tác.`
-        : `Are you sure you want to permanently delete account ${user.email}? This action cannot be undone.`,
-      confirmLabel: locale === 'vi' ? 'Xóa người dùng' : 'Delete User',
+        ? `Thao tác này xóa tài khoản và dữ liệu của ${user.email} trong ứng dụng. Mailbox Google Workspace và các bài có đồng tác giả khác sẽ được giữ nguyên.`
+        : `This permanently deletes ${user.email}'s Firebase account and application data. Their Workspace mailbox and stored PDF files will be preserved.`,
+      confirmLabel: locale === 'vi' ? 'Xóa tài khoản' : 'Delete account',
       cancelLabel: locale === 'vi' ? 'Hủy' : 'Cancel',
       isDanger: true,
+      requiredConfirmation: user.email,
       onConfirm: async () => {
         setBusyId(user.id);
         setMessage(null);
         setError(null);
         try {
-          await adminApi.deleteUser(user.id);
+          await adminApi.deleteUser(user.id, user.email);
           refreshAccounts(page);
           refreshOverview();
           setMessage(locale === 'vi' ? `Đã xóa tài khoản ${user.email}.` : `Deleted account ${user.email}.`);
@@ -231,7 +312,6 @@ export function AdminUsersView() {
       },
     });
   };
-
   // Create User submit
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,23 +319,32 @@ export function AdminUsersView() {
 
     setBusyId('create');
     setMessage(null);
-    setError(null);
+    setCreateError(null);
     try {
-      await adminApi.createUser({
+      await createWorkspaceProfile({
         email: createForm.email.trim(),
         name: createForm.name.trim() || undefined,
         studentId: createForm.studentId.trim() || undefined,
         major: createForm.major.trim() || undefined,
-        role: createForm.role,
-        password: createForm.password.trim() || undefined,
+        role: createForm.role || 'STUDENT',
       });
       setIsCreateOpen(false);
-      setCreateForm({ name: '', email: '', studentId: '', major: '', role: 'STUDENT', password: '' });
+      setCreateForm({ name: '', email: '', studentId: '', major: '', role: 'STUDENT' });
       refreshAccounts(1);
       refreshOverview();
+      void refreshWorkspace(1, [undefined], workspaceSearch);
       setMessage(locale === 'vi' ? `Đã tạo tài khoản mới thành công.` : `Successfully created new account.`);
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'Unable to create user.');
+      const errorMessage = reason instanceof Error ? reason.message : 'Unable to create profile.';
+      const viErrors: Record<string, string> = {
+        'This Workspace email is already assigned to an application profile.': 'Email Workspace này đã được gán cho một hồ sơ khác.',
+        'This Workspace email is already linked to another application profile.': 'Email Workspace này đã liên kết với hồ sơ khác.',
+        'Only an existing Workspace mailbox can be linked. No mailbox was created.': 'Chỉ có thể liên kết mailbox Workspace đã tồn tại; hệ thống không tạo mailbox mới.',
+        'Restore this Workspace account before linking it to a profile.': 'Hãy khôi phục tài khoản Workspace trước khi liên kết hồ sơ.',
+        'Use the Workspace account’s primary email address, not an alias.': 'Hãy nhập email chính của tài khoản Workspace, không dùng email bí danh.',
+        'The email must use the configured Workspace domain.': 'Email phải thuộc domain Workspace đã cấu hình.',
+      };
+      setCreateError(locale === 'vi' ? viErrors[errorMessage] || errorMessage : errorMessage);
     } finally {
       setBusyId(null);
     }
@@ -335,6 +424,161 @@ export function AdminUsersView() {
           <button type="button" onClick={() => setError(null)} style={{ background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontSize: '18px' }}>×</button>
         </div>
       )}
+
+      <section className="workspace-admin" aria-labelledby="workspace-accounts-title">
+        <header className="workspace-admin__header">
+          <div className="workspace-admin__heading">
+            <span className="workspace-admin__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M3.75 6.75h16.5v10.5H3.75z" stroke="currentColor" strokeWidth="1.7"/><path d="m4.5 8 7.5 5.25L19.5 8M8 17.25l2.2-2.7m5.8 2.7-2.2-2.7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </span>
+            <div className="workspace-admin__title-group">
+              <div className="workspace-admin__title-row">
+                <h2 id="workspace-accounts-title">Google Workspace</h2>
+                <span className={`workspace-admin__connection ${workspaceLoading && !workspaceStatus ? 'is-loading' : workspaceStatus?.connected ? 'is-connected' : 'is-disconnected'}`} aria-live="polite">
+                  <span className="workspace-admin__connection-dot" />
+                  {workspaceLoading && !workspaceStatus ? 'Checking connection' : workspaceStatus?.connected ? 'Connected' : 'Not connected'}
+                </span>
+              </div>
+              <p>Create and manage organization email accounts.</p>
+            </div>
+          </div>
+          <div className="workspace-admin__header-actions">
+            <Button variant="secondary" disabled={workspaceBusy || workspaceLoading || workspaceSearchInput.trim() !== workspaceSearch} onClick={() => void refreshWorkspace()}>
+              {workspaceLoading ? 'Refreshing…' : 'Refresh'}
+            </Button>
+            {workspaceStatus?.connected ? (
+              <Button variant="secondary" disabled={workspaceBusy} onClick={() => {
+                if (window.confirm(`Disconnect ${workspaceStatus.adminEmail}?`)) void runWorkspaceAction(disconnectGoogleWorkspace);
+              }}>Disconnect</Button>
+            ) : (
+              <Button variant="primary" disabled={workspaceBusy || workspaceLoading} onClick={() => void connectGoogleWorkspace().catch((reason) => setWorkspaceError(reason instanceof Error ? reason.message : 'Unable to connect Google Workspace.'))}>Connect Google Workspace</Button>
+            )}
+          </div>
+        </header>
+
+        {workspaceError && <div className="workspace-admin__error" role="alert">{workspaceError}</div>}
+
+        {workspaceStatus?.connected ? <>
+          <div className="workspace-admin__connection-details">
+            <div>
+              <span className="workspace-admin__detail-label">Workspace domain</span>
+              <strong>{workspaceStatus.domain}</strong>
+            </div>
+            <span className="workspace-admin__detail-divider" aria-hidden="true" />
+            <div>
+              <span className="workspace-admin__detail-label">Connected administrator</span>
+              <strong>{workspaceStatus.adminEmail}</strong>
+            </div>
+            <span className="workspace-admin__accounts-count">{workspaceUsers.length} shown · 5 per page</span>
+          </div>
+
+          <form className="workspace-admin__create" onSubmit={(event) => {
+            event.preventDefault();
+            void runWorkspaceAction(async () => {
+              await createWorkspaceUser({ ...workspaceForm, changePasswordAtNextLogin: true, orgUnitPath: '/' });
+              setWorkspaceForm({ email: '', firstName: '', lastName: '' });
+            });
+          }}>
+            <div className="workspace-admin__create-heading">
+              <div>
+                <h3>Create an account</h3>
+                <p>A unique temporary password is generated automatically, encrypted for up to 7 days, then emailed once after the profile is linked. Users must change it at first sign-in.</p>
+              </div>
+              <span className="workspace-admin__domain-hint">Use @{workspaceStatus.domain}</span>
+            </div>
+            <div className="workspace-admin__form-grid">
+              <label className="workspace-admin__field workspace-admin__field--email">
+                <span>Email address</span>
+                <input aria-label="Workspace email" type="email" required autoComplete="off" placeholder={`name@${workspaceStatus.domain}`} value={workspaceForm.email} onChange={(event) => setWorkspaceForm({ ...workspaceForm, email: event.target.value })} />
+              </label>
+              <label className="workspace-admin__field">
+                <span>First name</span>
+                <input aria-label="First name" required autoComplete="given-name" placeholder="First name" value={workspaceForm.firstName} onChange={(event) => setWorkspaceForm({ ...workspaceForm, firstName: event.target.value })} />
+              </label>
+              <label className="workspace-admin__field">
+                <span>Last name</span>
+                <input aria-label="Last name" required autoComplete="family-name" placeholder="Last name" value={workspaceForm.lastName} onChange={(event) => setWorkspaceForm({ ...workspaceForm, lastName: event.target.value })} />
+              </label>
+              <Button variant="primary" type="submit" disabled={workspaceBusy}>
+                {workspaceBusy ? 'Creating…' : 'Create account'}
+              </Button>
+            </div>
+          </form>
+
+          <div className="workspace-admin__list-heading">
+            <div>
+              <h3>Organization accounts</h3>
+              <p>Manage access for accounts in this Workspace.</p>
+            </div>
+            <div className="workspace-admin__list-tools">
+              <label className="workspace-admin__search">
+                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.8" stroke="currentColor" strokeWidth="1.6"/><path d="m13.2 13.2 4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                <input
+                  type="search"
+                  aria-label="Search Workspace accounts by name or email"
+                  placeholder="Search name or email"
+                  value={workspaceSearchInput}
+                  onChange={(event) => {
+                    setWorkspaceSearchInput(event.target.value);
+                    setWorkspacePage(1);
+                    setWorkspacePageTokens([undefined]);
+                    setWorkspaceNextPageToken(null);
+                  }}
+                />
+              </label>
+              {workspaceLoading && <span className="workspace-admin__refreshing">Searching…</span>}
+            </div>
+          </div>
+
+          <div className="table-wrap workspace-admin__table-wrap">
+            <table className="data-table workspace-admin__table">
+              <thead><tr><th>Email address</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                {workspaceUsers.map((user) => <tr key={user.id}>
+                  <td><span className="workspace-admin__email">{user.primaryEmail}</span></td>
+                  <td>{user.name.fullName}</td>
+                  <td><span className={`workspace-admin__user-status ${user.suspended ? 'is-suspended' : 'is-active'}`}><span />{user.suspended ? 'Suspended' : 'Active'}</span></td>
+                  <td>
+                    <div className="workspace-admin__row-actions">
+                      <Button variant="secondary" disabled={workspaceBusy} onClick={() => void runWorkspaceAction(() => user.suspended ? restoreWorkspaceUser(user.id) : suspendWorkspaceUser(user.id))}>{user.suspended ? 'Restore access' : 'Suspend'}</Button>
+                      {workspaceStatus.deleteEnabled && <Button variant="secondary" disabled={workspaceBusy} onClick={() => {
+                        const confirmation = window.prompt(`Type ${user.primaryEmail} to permanently delete this Workspace account.`);
+                        if (confirmation === user.primaryEmail) void runWorkspaceAction(() => deleteWorkspaceUser(user.id, confirmation));
+                      }}>Delete</Button>}
+                    </div>
+                  </td>
+                </tr>)}
+                {!workspaceLoading && workspaceUsers.length === 0 && <tr><td colSpan={4} className="workspace-admin__empty">{workspaceSearch ? 'No accounts match your search.' : 'No Workspace accounts found.'}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <nav className="workspace-admin__pagination" aria-label="Workspace accounts pagination">
+            <span>Page {workspacePage}</span>
+            <div>
+              <Button variant="secondary" disabled={workspaceBusy || workspaceLoading || workspaceSearchInput.trim() !== workspaceSearch || workspacePage <= 1} onClick={() => {
+                const targetPage = workspacePage - 1;
+                setWorkspacePage(targetPage);
+                void refreshWorkspace(targetPage, workspacePageTokens);
+              }}>Previous</Button>
+              <Button variant="secondary" disabled={workspaceBusy || workspaceLoading || workspaceSearchInput.trim() !== workspaceSearch || !workspaceNextPageToken} onClick={() => {
+                if (!workspaceNextPageToken) return;
+                const targetPage = workspacePage + 1;
+                const pageTokens = [...workspacePageTokens];
+                pageTokens[targetPage - 1] = workspaceNextPageToken;
+                setWorkspacePageTokens(pageTokens);
+                setWorkspacePage(targetPage);
+                void refreshWorkspace(targetPage, pageTokens);
+              }}>Next</Button>
+            </div>
+          </nav>
+        </> : !workspaceLoading && <div className="workspace-admin__not-connected">
+          <span className="workspace-admin__not-connected-mark" aria-hidden="true">!</span>
+          <div>
+            <strong>Connect an administrator account to continue</strong>
+            <p>Use an approved Google Workspace administrator to manage organization accounts here.</p>
+          </div>
+        </div>}
+      </section>
 
       {/* Filter Toolbar with Navigation Role Tabs */}
       <div className="student-filter-toolbar" style={{ marginBottom: '20px' }}>
@@ -433,7 +677,7 @@ export function AdminUsersView() {
           </div>
 
           {/* Add User button */}
-          <Button variant="primary" onClick={() => setIsCreateOpen(true)}>
+          <Button variant="primary" onClick={() => { setCreateError(null); setIsCreateOpen(true); }}>
             {locale === 'vi' ? '+ Thêm tài khoản' : '+ Add Account'}
           </Button>
         </div>
@@ -476,6 +720,7 @@ export function AdminUsersView() {
                               </span>
                             )}
                           </div>
+                          {user.workspaceEmail && <span style={{ display: 'block', marginTop: 3, fontSize: 11.5, color: '#0369a1' }}>Workspace SSO: {user.workspaceEmail}</span>}
                         </div>
                       </div>
                     </td>
@@ -517,6 +762,32 @@ export function AdminUsersView() {
                     </td>
                     <td className="admin-user-col-actions" style={{ whiteSpace: 'nowrap' }}>
                       <div className="review-actions" style={{ justifyContent: 'flex-end', gap: '6px', flexWrap: 'nowrap' }}>
+                        {user.workspaceEmail && <Button
+                          variant="secondary"
+                          disabled={busyId === user.id}
+                          onClick={() => setConfirmModal({
+                            open: true,
+                            title: 'Resend Workspace sign-in instructions?',
+                            description: `This sends sign-in instructions to ${user.email}. The existing Workspace mailbox and its password will not be changed.`,
+                            confirmLabel: 'Resend instructions',
+                            cancelLabel: 'Cancel',
+                            onConfirm: async () => {
+                              setBusyId(user.id);
+                              setError(null);
+                              try {
+                                await adminApi.resendWorkspaceNotice(user.id);
+                                setMessage(`Workspace sign-in instructions sent to ${user.email}. No password was changed.`);
+                                setConfirmModal(null);
+                              } catch (reason) {
+                                setError(reason instanceof Error ? reason.message : 'Could not resend the Workspace sign-in notice.');
+                              } finally {
+                                setBusyId(null);
+                              }
+                            },
+                          })}
+                          style={{ fontSize: 12, padding: '5px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}
+                          title="Resend sign-in instructions without changing the password"
+                        >Resend access</Button>}
                         <Button
                           variant="secondary"
                           disabled={busyId === user.id}
@@ -613,9 +884,9 @@ export function AdminUsersView() {
 
       {/* Create User Modal */}
       {isCreateOpen && (
-        <div className="admin-modal-backdrop" onClick={() => !busyId && setIsCreateOpen(false)}>
-          <div className="admin-modal-card" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" style={{ maxWidth: '520px' }}>
-            <div className="admin-modal-header">
+        <div className="admin-modal-backdrop admin-profile-create-backdrop" onClick={() => !busyId && setIsCreateOpen(false)}>
+          <div className="admin-modal-card admin-profile-create-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-profile-create-title" aria-describedby="admin-profile-create-description">
+            <div className="admin-modal-header admin-profile-create-header">
               <div className="admin-modal-icon admin-modal-icon--primary">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -625,16 +896,16 @@ export function AdminUsersView() {
                 </svg>
               </div>
               <div>
-                <h3 className="admin-modal-title">{locale === 'vi' ? 'Thêm tài khoản mới' : 'Add New Account'}</h3>
-                <p className="admin-modal-subtitle">
-                  {locale === 'vi' ? 'Tạo trực tiếp tài khoản người dùng vào hệ thống' : 'Create a new user account directly'}
+                <h3 id="admin-profile-create-title" className="admin-modal-title">{locale === 'vi' ? 'Tạo hồ sơ Workspace' : 'Create Workspace profile'}</h3>
+                <p id="admin-profile-create-description" className="admin-modal-subtitle">
+                  {locale === 'vi' ? 'Liên kết một email Workspace đang hoạt động với hồ sơ ứng dụng.' : 'Link an active Workspace email to an application profile.'}
                 </p>
               </div>
               <button
                 type="button"
                 className="admin-modal-close"
                 onClick={() => !busyId && setIsCreateOpen(false)}
-                aria-label="Close"
+                aria-label={locale === 'vi' ? 'Đóng' : 'Close'}
                 disabled={Boolean(busyId)}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -644,38 +915,59 @@ export function AdminUsersView() {
               </button>
             </div>
 
-            <form onSubmit={handleCreateSubmit}>
-              <div className="admin-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                <div className="admin-modal-field">
-                  <label className="admin-modal-label">
-                    Email <span style={{ color: '#dc2626' }}>*</span>
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="user@hyperdata.org"
-                    value={createForm.email}
-                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                    className="admin-modal-input"
-                  />
+            <form className="admin-profile-create-form" onSubmit={handleCreateSubmit}>
+              <div className="admin-modal-body admin-profile-create-body">
+                <div className="admin-profile-create-note" role="note">
+                  <span className="admin-profile-create-note__icon" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+                  </span>
+                  <p>{locale === 'vi'
+                    ? 'Không tạo hộp thư hay mật khẩu mới. Người dùng đăng nhập bằng Google Workspace với email này.'
+                    : 'No mailbox or password will be created. The user signs in with Google Workspace using this email.'}</p>
                 </div>
 
                 <div className="admin-modal-field">
-                  <label className="admin-modal-label">
+                  <label className="admin-modal-label" htmlFor="admin-profile-workspace-email">
+                    {locale === 'vi' ? 'Email Workspace' : 'Workspace email'} <span aria-hidden="true" style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <input
+                    id="admin-profile-workspace-email"
+                    type="email"
+                    required
+                    autoComplete="off"
+                    placeholder={`name@${workspaceStatus?.domain || 'hyperdatalab.org'}`}
+                    value={createForm.email}
+                    onChange={(e) => { setCreateForm({ ...createForm, email: e.target.value }); setCreateError(null); }}
+                    className="admin-modal-input"
+                    aria-invalid={Boolean(createError)}
+                    aria-describedby={createError ? 'admin-profile-create-error' : 'admin-profile-email-hint'}
+                  />
+                  <span id="admin-profile-email-hint" className="admin-profile-create-hint">
+                    {locale === 'vi'
+                      ? `Dùng email chính thuộc ${workspaceStatus?.domain || 'Workspace'}, đang hoạt động và chưa được gán cho hồ sơ khác.`
+                      : `Use an active primary email in ${workspaceStatus?.domain || 'your Workspace'} that is not linked to another profile.`}
+                  </span>
+                </div>
+
+                <div className="admin-modal-field">
+                  <label className="admin-modal-label" htmlFor="admin-profile-full-name">
                     {locale === 'vi' ? 'Họ và tên' : 'Full Name'}
                   </label>
                   <input
+                    id="admin-profile-full-name"
                     type="text"
                     placeholder={locale === 'vi' ? 'Nguyễn Văn A' : 'John Doe'}
                     value={createForm.name}
                     onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
                     className="admin-modal-input"
+                    autoComplete="name"
                   />
+                  <span className="admin-profile-create-hint">{locale === 'vi' ? 'Để trống để dùng tên đã lưu trong Google Workspace.' : 'Leave blank to use the name saved in Google Workspace.'}</span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="admin-profile-create-grid">
                   <div className="admin-modal-field">
-                    <label className="admin-modal-label">
+                    <label className="admin-modal-label" id="admin-profile-role-label">
                       {locale === 'vi' ? 'Vai trò' : 'Role'}
                     </label>
                     <div className="users-create-role-dropdown">
@@ -689,52 +981,46 @@ export function AdminUsersView() {
                         ]}
                         disabled={Boolean(busyId)}
                         style={{ width: '100%' }}
+                        ariaLabel={locale === 'vi' ? 'Chọn vai trò hồ sơ' : 'Select profile role'}
                       />
                     </div>
                   </div>
 
                   <div className="admin-modal-field">
-                    <label className="admin-modal-label">
+                    <label className="admin-modal-label" htmlFor="admin-profile-student-id">
                       {locale === 'vi' ? 'Mã sinh viên (nếu có)' : 'Student ID'}
                     </label>
                     <input
+                      id="admin-profile-student-id"
                       type="text"
-                      placeholder="SE123456"
+                      placeholder={locale === 'vi' ? 'VD: SE123456' : 'e.g. SE123456'}
                       value={createForm.studentId}
                       onChange={(e) => setCreateForm({ ...createForm, studentId: e.target.value })}
                       className="admin-modal-input"
+                      autoComplete="off"
                     />
                   </div>
                 </div>
 
                 <div className="admin-modal-field">
-                  <label className="admin-modal-label">
+                  <label className="admin-modal-label" htmlFor="admin-profile-major">
                     {locale === 'vi' ? 'Ngành / Khoa' : 'Major / Department'}
                   </label>
                   <input
+                    id="admin-profile-major"
                     type="text"
                     placeholder={locale === 'vi' ? 'Kỹ thuật phần mềm' : 'Software Engineering'}
                     value={createForm.major}
                     onChange={(e) => setCreateForm({ ...createForm, major: e.target.value })}
                     className="admin-modal-input"
+                    autoComplete="organization-title"
                   />
                 </div>
 
-                <div className="admin-modal-field">
-                  <label className="admin-modal-label" style={{ marginBottom: 4 }}>
-                    {locale === 'vi' ? 'Mật khẩu khởi tạo' : 'Initial Password'}
-                  </label>
-                  <input
-                    type="password"
-                    placeholder={locale === 'vi' ? 'Để trống nếu tạo mật khẩu ngẫu nhiên' : 'Leave empty to auto-generate'}
-                    value={createForm.password}
-                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                    className="admin-modal-input"
-                  />
-                </div>
+                {createError && <div id="admin-profile-create-error" className="admin-profile-create-error" role="alert">{createError}</div>}
               </div>
 
-              <div className="admin-modal-footer">
+              <div className="admin-modal-footer admin-profile-create-footer">
                 <button
                   type="button"
                   className="admin-btn-cancel"
@@ -748,7 +1034,7 @@ export function AdminUsersView() {
                   className="admin-btn-confirm admin-btn-confirm--primary"
                   disabled={Boolean(busyId)}
                 >
-                  {busyId ? (locale === 'vi' ? 'Đang tạo...' : 'Creating...') : (locale === 'vi' ? 'Tạo tài khoản' : 'Create Account')}
+                  {busyId ? (locale === 'vi' ? 'Đang tạo hồ sơ...' : 'Creating profile...') : (locale === 'vi' ? 'Tạo hồ sơ' : 'Create profile')}
                 </button>
               </div>
             </form>
@@ -797,6 +1083,25 @@ export function AdminUsersView() {
               </button>
             </div>
 
+            {confirmModal.requiredConfirmation && (
+              <div style={{ padding: '0 24px 20px' }}>
+                <label htmlFor="delete-user-confirmation" style={{ display: 'block', marginBottom: 8, fontWeight: 600, color: '#334155' }}>
+                  {locale === 'vi' ? 'Nhập chính xác email để xác nhận' : 'Type the exact email to confirm'}
+                </label>
+                <input
+                  id="delete-user-confirmation"
+                  type="email"
+                  autoComplete="off"
+                  value={confirmText}
+                  onChange={(event) => setConfirmText(event.target.value)}
+                  placeholder={confirmModal.requiredConfirmation}
+                  style={{ width: '100%', boxSizing: 'border-box', minHeight: 44, padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, color: '#0f172a', font: 'inherit', outlineColor: '#0284c7' }}
+                />
+                <p className="admin-modal-subtitle" style={{ marginTop: 8 }}>
+                  {locale === 'vi' ? 'Mailbox Workspace sẽ không bị xóa hoặc thay đổi.' : 'The Workspace mailbox will not be deleted or changed.'}
+                </p>
+              </div>
+            )}
             <div className="admin-modal-footer">
               <button
                 type="button"
@@ -810,7 +1115,7 @@ export function AdminUsersView() {
                 type="button"
                 className={`admin-btn-confirm ${confirmModal.isDanger ? 'admin-btn-confirm--rejected' : 'admin-btn-confirm--published'}`}
                 onClick={() => confirmModal.onConfirm()}
-                disabled={Boolean(busyId)}
+                disabled={Boolean(busyId) || Boolean(confirmModal.requiredConfirmation && confirmText !== confirmModal.requiredConfirmation)}
               >
                 {busyId ? (
                   <>

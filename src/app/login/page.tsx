@@ -21,6 +21,25 @@ function LoginForm() {
 
   const [quickLoadingRole, setQuickLoadingRole] = useState<'admin' | 'lecturer' | 'student' | null>(null);
 
+  const handleWorkspaceLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const data = await authApi.loginWithWorkspace();
+      if (!data.success || !data.user) {
+        setError(data.error || 'Google Workspace sign-in failed.');
+        setLoading(false);
+        return;
+      }
+      if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
+      else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
+      else window.location.href = nextPath;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Google Workspace sign-in failed.');
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -89,7 +108,20 @@ function LoginForm() {
       </div>
 
       {/* 3 Nút Đăng nhập nhanh để Test (Dev Quick Test) */}
-      {(process.env.NEXT_PUBLIC_ENABLE_QUICK_LOGIN !== undefined 
+      <p style={{ margin: '-12px 0 14px', color: '#475569', fontSize: 13, lineHeight: 1.5 }}>
+        Approved users sign in with their existing Google Workspace account. Personal email is for contact only.
+      </p>
+      <button
+        type="button"
+        onClick={() => void handleWorkspaceLogin()}
+        disabled={loading}
+        style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, padding: '12px 16px', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', color: '#0f172a', fontSize: 14, fontWeight: 700, cursor: loading ? 'wait' : 'pointer', marginBottom: 14 }}
+      >
+        <span aria-hidden="true" style={{ color: '#4285f4', fontWeight: 800, fontSize: 18 }}>G</span>
+        Continue with Google Workspace
+      </button>
+
+      {(process.env.NEXT_PUBLIC_ENABLE_QUICK_LOGIN !== undefined
         ? process.env.NEXT_PUBLIC_ENABLE_QUICK_LOGIN === 'true' 
         : process.env.NODE_ENV !== 'production') && (
         <div style={{
@@ -220,6 +252,12 @@ function LoginForm() {
           <div>{error}</div>
         </div>
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0 14px', color: '#94a3b8', fontSize: 11 }}>
+        <span style={{ height: 1, flex: 1, background: '#e2e8f0' }} />
+        <span>LEGACY / DEVELOPMENT ACCOUNTS</span>
+        <span style={{ height: 1, flex: 1, background: '#e2e8f0' }} />
+      </div>
 
       <form onSubmit={handleSubmit} className="auth-form" style={{ gap: 16 }}>
         <div className="auth-field" style={{ gap: 6, textAlign: 'left' }}>

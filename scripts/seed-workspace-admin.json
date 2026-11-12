@@ -1,0 +1,10 @@
+{
+  "description": "Links the existing Workspace administrator mailbox to one approved Firebase application profile. Does not create a Workspace mailbox or send email.",
+  "email": "admin@hyperdatalab.org",
+  "displayName": "Admin Hyperdatalab",
+  "firstName": "Admin",
+  "lastName": "Hyperdatalab",
+  "role": "ADMIN",
+  "status": "APPROVED",
+  "isActive": true
+}

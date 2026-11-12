@@ -26,7 +26,9 @@ service cloud.firestore {
       return signedIn()
         && hasProfile(request.auth.uid)
         && profile(request.auth.uid).isActive == true
-        && profile(request.auth.uid).status == 'APPROVED';
+        && profile(request.auth.uid).status == 'APPROVED'
+        && (!('workspaceEmail' in profile(request.auth.uid))
+          || request.auth.token.firebase.sign_in_provider == 'custom');
     }
 
     function roleIs(role) {
@@ -267,15 +269,8 @@ service cloud.firestore {
     match /userProfiles/{uid} {
       allow get: if ownUser(uid) || isAdmin();
       allow list: if isAdmin();
-      allow create: if ownUser(uid)
-        && request.resource.data.keys().hasOnly([
-          'email', 'name', 'firstName', 'lastName', 'studentId', 'major', 'phone',
-          'affiliation', 'avatarUrl', 'role', 'status', 'isActive', 'createdAt', 'updatedAt'
-        ])
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.role == 'STUDENT'
-        && request.resource.data.status == 'PENDING'
-        && request.resource.data.isActive == false;
+      // User profiles are created by the trusted Worker only after admin approval.
+      allow create: if false;
       allow update: if isAdmin()
         || (ownUser(uid)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([

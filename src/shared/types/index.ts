@@ -3,6 +3,7 @@ export type PreprintStatus = 'DRAFT' | 'SUBMITTED' | 'UNDER_REVIEW' | 'NEEDS_REV
 export type User = {
   id: string;
   email: string;
+  workspaceEmail?: string;
   name?: string;
   firstName?: string;
   lastName?: string;

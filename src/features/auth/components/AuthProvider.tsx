@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useEffect, useState, type ReactNode } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import type { User } from '@/shared/types';
 import { authApi, loadUserProfile } from '../api/authApi';
 import { firebaseAuth } from '@/lib/firebase/client';
@@ -29,7 +29,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const currentUser = firebaseAuth().currentUser;
-      setUser(currentUser ? await loadUserProfile(currentUser.uid) : null);
+      if (!currentUser) {
+        setUser(null);
+        return;
+      }
+      const profile = await loadUserProfile(currentUser.uid);
+      const token = await currentUser.getIdTokenResult();
+      const provider = (token.claims.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider;
+      if (!profile || !profile.isActive || profile.status !== 'APPROVED' || (profile.workspaceEmail && provider !== 'custom')) {
+        await signOut(firebaseAuth());
+        setUser(null);
+        return;
+      }
+      setUser(profile);
     } catch {
       setUser(null);
     } finally {
@@ -55,7 +67,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         try {
-          setUser(await loadUserProfile(firebaseUser.uid));
+          const profile = await loadUserProfile(firebaseUser.uid);
+          const token = await firebaseUser.getIdTokenResult();
+          const provider = (token.claims.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider;
+          if (!profile || !profile.isActive || profile.status !== 'APPROVED' || (profile.workspaceEmail && provider !== 'custom')) {
+            await signOut(firebaseAuth());
+            setUser(null);
+            setLoading(false);
+            return;
+          }
+          setUser(profile);
         } catch {
           setUser(null);
         } finally {

@@ -6,7 +6,7 @@ Next.js frontend for the public repository, student submission workspace, lectur
 
 - Firebase Authentication owns browser sign-in and password resets.
 - The Firebase Web SDK reads and writes Firestore directly. `firestore.rules` is the authorization boundary; do not rely on UI role checks alone.
-- The Cloudflare Worker owns authenticated PDF access through its R2 bucket binding. The manuscript form sends PDFs to the configured GROBID HTTPS service for metadata extraction.
+- The Cloudflare Worker owns authenticated PDF access through its R2 bucket binding and Google Workspace account administration through the Admin SDK Directory API. The manuscript form sends PDFs to the configured GROBID HTTPS service for metadata extraction.
 - The previous Fastify API is no longer part of the frontend runtime. The frontend and its Worker source, configuration, and deployment commands are maintained in this repository.
 
 ## Configure Firebase and the Worker
@@ -16,7 +16,11 @@ Next.js frontend for the public repository, student submission workspace, lectur
 3. Deploy Firestore rules and indexes from this directory with `firebase deploy --only firestore:rules,firestore:indexes --project hyperdatalab-27172`.
 4. The Worker binds the existing `storage-pdf` bucket in `worker/wrangler.toml`; it uses this binding and does not need R2 S3 credentials. Set `FRONTEND_ORIGINS` to the exact FE origins that will call it.
 5. Run `npm run worker:dev` for local development or `npm run worker:deploy` to deploy. Wrangler prints the deployed `workers.dev` URL; set that origin as `NEXT_PUBLIC_R2_WORKER_URL` in `.env.local` and restart the FE.
-6. Set `FIREBASE_WEB_API_KEY` as a Worker secret if using the Worker registration and invitation routes: `npx wrangler secret put FIREBASE_WEB_API_KEY --config worker/wrangler.toml`.
+6. Set `FIREBASE_WEB_API_KEY` as a Worker secret only if using the account-invitation route: `npx wrangler secret put FIREBASE_WEB_API_KEY --config worker/wrangler.toml`. Public registration stores applicant details only in `registrationRequests`; it does not create Firebase Auth or an application profile.
+
+Google Workspace account administration requires a Cloudflare D1 database, a Google OAuth Web Application client, and Worker secrets. Follow [Google Workspace setup](docs/GOOGLE_WORKSPACE_SETUP.md), [API reference](docs/API_REFERENCE.md), [frontend integration](docs/FRONTEND_INTEGRATION.md), and [security notes](docs/SECURITY.md). It uses the existing Worker's Firebase Admin authorization and does not use a separate backend or Domain-Wide Delegation.
+
+Workspace Directory users are separate from Firebase Auth users and Firestore profiles. To link the already existing `admin@hyperdatalab.org` mailbox to an approved Firebase profile, first apply the D1 migrations with `npm run worker:migrate:remote`, then run `npm run seed:workspace-admin`. The seed uses the service-account path and project confirmation in `.env.local`; it does not create a mailbox, change a password, or send email. It creates/reuses the Firebase `userProfiles` document and adds the matching D1 SSO link. The general demo seed remains `npm run seed`.
 
 The Firebase Web API key and web app configuration are client identifiers, not service-account credentials. Never put a Firebase service-account key or an R2 access key in this repository or a `NEXT_PUBLIC_*` variable. The Worker uses the R2 binding and does not need S3 credentials.
 
@@ -46,6 +50,7 @@ The app runs on `http://localhost:3003`. Run `npm run worker:dev` from this repo
 ```bash
 npm run lint
 npm run build
+npm run worker:test
 ```
 
 The reusable design system is included as `@hyperdata/design-system` in `packages/design-system`.

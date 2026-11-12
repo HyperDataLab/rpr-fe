@@ -22,8 +22,6 @@ export interface AdminShellProps {
   children: ReactNode;
 }
 
-let globalPendingCountCache: number | undefined = undefined;
-
 export function AdminSidebar({
   active,
   pendingCount,
@@ -38,7 +36,7 @@ export function AdminSidebar({
   const { user } = useAuth();
   const { t, locale } = useTranslation();
   const [internalPendingCount, setInternalPendingCount] = useState<number | undefined>(
-    () => pendingCount ?? globalPendingCountCache
+    () => pendingCount
   );
 
   useEffect(() => {
@@ -50,14 +48,18 @@ export function AdminSidebar({
   useEffect(() => {
     if (!user?.id || user.role !== 'ADMIN' || !user.isActive || user.status !== 'APPROVED') return;
     const pendingQuery = query(
-      collection(firestoreDb(), 'userProfiles'),
+      collection(firestoreDb(), 'registrationRequests'),
       where('status', '==', 'PENDING'),
       limit(1000),
     );
-    return onSnapshot(pendingQuery, (snapshot) => {
-      const count = snapshot.size;
-      globalPendingCountCache = count;
-      setInternalPendingCount(count);
+    return onSnapshot(pendingQuery, { includeMetadataChanges: true }, (snapshot) => {
+      // A cached snapshot can outlive a resolved/rejected registration. Only show a
+      // badge after Firestore confirms the current server-side count.
+      if (snapshot.metadata.fromCache) return;
+      setInternalPendingCount(snapshot.size);
+    }, (reason) => {
+      console.warn('Admin registration count listener failed:', reason.code);
+      setInternalPendingCount(undefined);
     });
   }, [user?.id, user?.isActive, user?.role, user?.status]);
 

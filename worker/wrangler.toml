@@ -3,9 +3,37 @@ main = "src/index.ts"
 compatibility_date = "2026-11-11"
 
 [vars]
-GROBID_ORIGIN = "http://100.121.61.95:8070"
+GROBID_ORIGIN = "https://grobid.hyperdatalab.org"
 FIREBASE_PROJECT_ID = "hyperdatalab-27172"
-FRONTEND_ORIGINS = "http://localhost:3003,http://localhost:3000,http://100.115.150.106:3003"
+FRONTEND_ORIGINS = "https://hyperdatalab.org,http://localhost:3003,http://localhost:3000,http://100.115.150.106:3003"
+ALLOWED_ORIGINS = "http://localhost:3003,http://localhost:3000,http://100.115.150.106:3003,https://hyperdatalab.org"
+FRONTEND_URL = "http://localhost:3003"
+WORKSPACE_DELETE_ENABLED = "false"
+
+GOOGLE_CLIENT_ID = "197071469592-gev2eoitvvq056oersbvgdp1hobfrro1.apps.googleusercontent.com"
+GOOGLE_REDIRECT_URI = "https://rpr-grobid-gateway.hpl-storage.workers.dev/auth/google/callback"
+GOOGLE_WORKSPACE_DOMAIN = "hyperdatalab.org"
+GOOGLE_ADMIN_EMAILS = "admin@hyperdatalab.org"
+TOKEN_ENCRYPTION_KEY_VERSION = "v1"
+RESEND_FROM_EMAIL = "HyperDataLab <accounts@hyperdatalab.org>"
+
+# Configure the following from the repository root; do not put their values in [vars]:
+# npx wrangler@4.160.1 secret put GOOGLE_CLIENT_SECRET --config worker/wrangler.toml
+# npx wrangler@4.160.1 secret put TOKEN_ENCRYPTION_KEYS --config worker/wrangler.toml
+# TOKEN_ENCRYPTION_KEYS value format: {"v1":"<base64-encoded-32-byte-key>"}
+# Needed only by the existing account-invitation route:
+# npx wrangler@4.160.1 secret put FIREBASE_WEB_API_KEY --config worker/wrangler.toml
+# Needed to sign Firebase custom tokens that preserve existing profile UIDs:
+# npx wrangler@4.160.1 secret put FIREBASE_SERVICE_ACCOUNT_JSON --config worker/wrangler.toml
+# Needed to send temporary Workspace credentials and approval notices to the applicant's personal email:
+# npx wrangler@4.160.1 secret put RESEND_API_KEY --config worker/wrangler.toml
+
+[[d1_databases]]
+binding = "DB"
+database_name = "researchpulse-workspace"
+# Replace this placeholder with the UUID returned by `wrangler d1 create`.
+database_id = "81383278-d3c8-41ee-8a87-aae71f8829c3"
+migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "PUBLICATION_PDFS"

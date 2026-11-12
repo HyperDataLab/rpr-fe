@@ -26,8 +26,11 @@ export type AdminPublicationAudience = 'GUEST' | 'STUDENT' | 'LECTURER';
 export type AdminUser = {
   id: string;
   email: string;
+  workspaceEmail?: string | null;
   username?: string | null;
   name?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
   phone?: string | null;
   studentId?: string | null;
   major?: string | null;
@@ -161,6 +164,7 @@ function userFrom(id: string, item: Record<string, unknown>): AdminUser {
   return {
     id,
     email: String(item.email || ''),
+    workspaceEmail: typeof item.workspaceEmail === 'string' ? item.workspaceEmail : null,
     username: typeof item.username === 'string' ? item.username : null,
     name: typeof item.name === 'string' ? item.name : null,
     phone: typeof item.phone === 'string' ? item.phone : null,
@@ -279,8 +283,9 @@ export const preprintApi = {
         uploader: uploader ? { id: uploader.id, name: uploader.name as string | undefined, email: String(uploader.email || ''), role: String(uploader.role || ''), studentId: uploader.studentId as string | undefined } : undefined,
       };
     }));
-    const lecturerCount = profiles.filter((item) => item.role === 'LECTURER' && item.isActive === true).length;
-    const studentCount = profiles.filter((item) => item.role === 'STUDENT').length;
+    const managedProfiles = profiles.filter((item) => item.status !== 'PENDING' && item.status !== 'REJECTED');
+    const lecturerCount = managedProfiles.filter((item) => item.role === 'LECTURER' && item.isActive === true).length;
+    const studentCount = managedProfiles.filter((item) => item.role === 'STUDENT').length;
     return {
       metrics: {
         submitted: counts.REVIEWING,
@@ -294,7 +299,7 @@ export const preprintApi = {
         total: publicationDocs.length,
       },
       byStatus: counts,
-      users: { total: profiles.length, lecturers: lecturerCount, students: studentCount },
+      users: { total: managedProfiles.length, lecturers: lecturerCount, students: studentCount },
       priorityQueue,
     };
   },
@@ -595,7 +600,8 @@ export const preprintApi = {
   async listUsers(params: { page?: number; limit?: number; role?: AdminUser['role']; search?: string; isActive?: boolean } = {}): Promise<AdminUsersResponse> {
     const users = (await records(PROFILES, orderBy('createdAt', 'desc'), limit(1000))).map((item) => userFrom(item.id, item));
     const needle = params.search?.trim().toLocaleLowerCase();
-    const filtered = users.filter((item) => (!params.role || item.role === params.role)
+    const filtered = users.filter((item) => item.status !== 'PENDING' && item.status !== 'REJECTED'
+      && (!params.role || item.role === params.role)
       && (typeof params.isActive !== 'boolean' || item.isActive === params.isActive)
       && (!needle || [item.name, item.email, item.username, item.studentId].some((value) => value?.toLocaleLowerCase().includes(needle))));
     const result = paginate(filtered, params.page, params.limit);
@@ -621,8 +627,12 @@ export const preprintApi = {
     return this.getUser(id);
   },
 
-  async deleteUser(_id: string): Promise<AdminUser> {
-    throw new Error('Deleting a Firebase Auth account requires the authenticated Cloudflare Worker admin route; it is not enabled in this FE build.');
+  async deleteUser(id: string, confirmEmail: string): Promise<void> {
+    await workerRequest(`/api/workspace/app-users/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmEmail }),
+    });
   },
 
   async updateUserRole(id: string, role: AdminUser['role']) {
@@ -663,51 +673,42 @@ export const preprintApi = {
     return { users: result.items, pagination: result.pagination };
   },
 
-  async approveUser(id: string) {
-    const target = await profile(id);
-    if (!target) throw new Error('User profile was not found. Legacy accounts require migration to Firebase Auth.');
-    if (target.status === 'APPROVED' && target.isActive) throw new Error('This account has already been approved.');
-    const adminId = await currentAdminId();
-    const previousStatus = target.status || 'PENDING';
-    const previousActive = target.isActive;
-    await updateDoc(doc(db(), PROFILES, id), {
-      status: 'APPROVED',
-      isActive: true,
-      mustChangePassword: true,
-      approvedAt: serverTimestamp(),
-      approvedById: adminId,
-      updatedAt: serverTimestamp(),
-    });
-    try {
-      await workerRequest('/auth/invite', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ userId: id }),
-      });
-    } catch (error) {
-      try {
-        await updateDoc(doc(db(), PROFILES, id), {
-          status: previousStatus,
-          isActive: previousActive,
-          approvedAt: null,
-          approvedById: null,
-          mustChangePassword: false,
-          updatedAt: serverTimestamp(),
-        });
-      } catch {
-        throw new Error(`Approval was saved, but the Firebase password setup email failed and profile rollback also failed. Retry the invite manually. ${error instanceof Error ? error.message : ''}`);
-      }
-      throw new Error(`The account was not approved because the setup email could not be sent. ${error instanceof Error ? error.message : ''}`);
-    }
-    return this.getUser(id);
+  async approveUser(id: string, payload: {
+    workspaceEmail: string;
+    firstName: string;
+    lastName: string;
+    studentId?: string;
+    major?: string;
+  }): Promise<AdminUser & { onboardingEmailSent: boolean }> {
+    const result = await workerRequest<{ data: { workspaceEmail: string; onboardingEmailSent: boolean } }>(
+      `/api/workspace/registrations/${encodeURIComponent(id)}/approve`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: id, ...payload }) },
+    );
+    return { ...(await this.getUser(id)), workspaceEmail: result.data.workspaceEmail, onboardingEmailSent: result.data.onboardingEmailSent };
+  },
+
+  async resendWorkspaceNotice(id: string) {
+    return workerRequest<{ data: { profileUid: string; workspaceEmail: string; onboardingEmailSent: boolean; temporaryPasswordRotated: boolean } }>(
+      `/api/workspace/registrations/${encodeURIComponent(id)}/resend`, { method: 'POST' },
+    );
   },
 
   async rejectUser(id: string) {
     const target = await profile(id);
-    if (!target) throw new Error('User profile was not found. Legacy accounts require migration to Firebase Auth.');
-    if (target.status === 'REJECTED') throw new Error('This application has already been rejected.');
-    await updateDoc(doc(db(), PROFILES, id), { status: 'REJECTED', isActive: false, updatedAt: serverTimestamp() });
-    return this.getUser(id);
+    const requestRef = doc(db(), 'registrationRequests', id);
+    const request = await getDoc(requestRef);
+    if (!target && !request.exists()) throw new Error('Registration request was not found.');
+    if (target?.status === 'APPROVED' || target?.status === 'SUSPENDED') throw new Error('An approved account cannot be rejected as a pending application.');
+    if (target?.status === 'REJECTED' || request.data()?.status === 'REJECTED') throw new Error('This application has already been rejected.');
+
+    const adminId = await currentAdminId();
+    if (request.exists()) {
+      await updateDoc(requestRef, { status: 'REJECTED', reviewedAt: serverTimestamp(), reviewedById: adminId });
+    }
+    if (target?.status === 'PENDING') {
+      await updateDoc(doc(db(), PROFILES, id), { status: 'REJECTED', isActive: false, updatedAt: serverTimestamp() });
+    }
+    return target ? this.getUser(id) : { id, status: 'REJECTED' as const };
   },
 };
 

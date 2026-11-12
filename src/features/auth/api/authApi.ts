@@ -1,11 +1,14 @@
 import {
   confirmPasswordReset,
+  GoogleAuthProvider,
+  signInWithCustomToken,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   updateProfile as updateFirebaseProfile,
 } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import type { User } from '@/shared/types';
 import { firebaseAuth, firestoreDb } from '@/lib/firebase/client';
 
@@ -21,6 +24,7 @@ function profileFromData(id: string, data: Record<string, unknown>): User {
   return {
     id,
     email: String(data.email || ''),
+    workspaceEmail: typeof data.workspaceEmail === 'string' ? data.workspaceEmail : undefined,
     name: typeof data.name === 'string' ? data.name : undefined,
     firstName: typeof data.firstName === 'string' ? data.firstName : undefined,
     lastName: typeof data.lastName === 'string' ? data.lastName : undefined,
@@ -59,6 +63,10 @@ export const authApi = {
         await signOut(firebaseAuth());
         return { success: false, error: 'Tài khoản chưa được chuyển sang hồ sơ Firebase. Vui lòng liên hệ quản trị viên.' };
       }
+      if (user.workspaceEmail) {
+        await signOut(firebaseAuth());
+        return { success: false, error: `Tài khoản này đăng nhập bằng Google Workspace (${user.workspaceEmail}), không dùng email cá nhân và mật khẩu.` };
+      }
       if (!user.isActive || user.status !== 'APPROVED') {
         await signOut(firebaseAuth());
         return { success: false, error: user.status === 'PENDING' ? 'Tài khoản đang chờ quản trị viên phê duyệt.' : 'Tài khoản chưa được kích hoạt.' };
@@ -69,19 +77,88 @@ export const authApi = {
     }
   },
 
-  async register(params: { firstName: string; lastName: string; email: string; studentId: string; major: string; phone?: string }) {
-    const workerUrl = process.env.NEXT_PUBLIC_R2_WORKER_URL;
-    if (!workerUrl) throw new Error('Cloudflare Worker chưa được cấu hình để nhận yêu cầu đăng ký.');
-    const response = await fetch(`${workerUrl.replace(/\/$/, '')}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+  async loginWithWorkspace(): Promise<{ success: boolean; user?: User; error?: string }> {
+    const auth = firebaseAuth();
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      hd: process.env.NEXT_PUBLIC_GOOGLE_WORKSPACE_DOMAIN || 'hyperdatalab.org',
+      prompt: 'select_account',
     });
-    const body = await response.json().catch(() => null) as { message?: string; error?: string } | null;
-    if (!response.ok) throw new Error(body?.message || body?.error || 'Không thể gửi yêu cầu đăng ký.');
-    return body;
+    try {
+      const googleCredential = await signInWithPopup(auth, provider);
+      const workerUrl = process.env.NEXT_PUBLIC_R2_WORKER_URL?.replace(/\/$/, '');
+      if (!workerUrl) throw new Error('Cloudflare Worker URL is not configured.');
+      const response = await fetch(`${workerUrl}/auth/workspace/exchange`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${await googleCredential.user.getIdToken()}`,
+          'content-type': 'application/json',
+        },
+        body: '{}',
+        cache: 'no-store',
+      });
+      const result = await response.json().catch(() => null) as {
+        data?: { customToken?: string };
+        error?: { message?: string };
+      } | null;
+      if (!response.ok || !result?.data?.customToken) {
+        throw new Error(result?.error?.message || 'Tài khoản Google này chưa được liên kết với hồ sơ ứng dụng.');
+      }
+
+      const credential = await signInWithCustomToken(auth, result.data.customToken);
+      const user = await loadUserProfile(credential.user.uid);
+      if (!user?.workspaceEmail || !user.isActive || user.status !== 'APPROVED') {
+        await signOut(auth);
+        return { success: false, error: 'Hồ sơ ứng dụng chưa được kích hoạt cho Google Workspace.' };
+      }
+      if (user.workspaceEmail.toLowerCase() !== googleCredential.user.email?.toLowerCase()) {
+        await signOut(auth);
+        return { success: false, error: 'Email Google đăng nhập không khớp email Workspace đã được cấp.' };
+      }
+      return { success: true, user };
+    } catch (error) {
+      await signOut(auth).catch(() => undefined);
+      return { success: false, error: error instanceof Error ? error.message : 'Đăng nhập Google Workspace thất bại.' };
+    }
   },
 
+  async register(params: { firstName: string; lastName: string; email: string; studentId: string; major: string; phone?: string }) {
+    const workerUrl = process.env.NEXT_PUBLIC_R2_WORKER_URL?.trim();
+    if (!workerUrl) throw new Error('Cloudflare Worker URL is not configured for registration.');
+    let response: Response;
+    try {
+      response = await fetch(`${workerUrl.replace(/\/$/, '')}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+    } catch {
+      throw new Error('Cannot reach the Cloudflare Worker. Check the network and try again.');
+    }
+    const rawBody = await response.text();
+    let body: {
+      success?: boolean;
+      message?: string;
+      requestId?: string;
+      user?: { email?: string; name?: string };
+      error?: string | { message?: string };
+    } | null = null;
+    try {
+      body = rawBody ? JSON.parse(rawBody) as {
+        success?: boolean;
+        message?: string;
+        requestId?: string;
+        user?: { email?: string; name?: string };
+        error?: string | { message?: string };
+      } : null;
+    } catch { /* The Worker may return a plain-text error. */ }
+    const errorMessage = typeof body?.error === 'string' ? body.error : body?.error?.message;
+    if (!response.ok) {
+      throw new Error(body?.message || errorMessage || rawBody.trim() || `Registration request failed (HTTP ${response.status}).`);
+    }
+    if (!body?.success || !body.user?.email || !body.user.name) throw new Error('The server returned an invalid registration response.');
+    return { ...body, success: true, user: { email: body.user.email, name: body.user.name } };
+  },
   async sendPasswordReset(email: string) {
     const auth = firebaseAuth();
     const actionCodeSettings = typeof window === 'undefined' ? undefined : {
@@ -119,18 +196,6 @@ export const authApi = {
   async logout() {
     await signOut(firebaseAuth());
     if (typeof window !== 'undefined') window.location.href = '/login';
-  },
-
-  async createPendingProfile(uid: string, input: { email: string; name?: string; firstName?: string; lastName?: string; studentId?: string; major?: string }) {
-    const now = serverTimestamp();
-    await setDoc(doc(firestoreDb(), USER_PROFILES, uid), {
-      ...input,
-      role: 'STUDENT',
-      status: 'PENDING',
-      isActive: false,
-      createdAt: now,
-      updatedAt: now,
-    });
   },
 
   loginUrl: '/login',

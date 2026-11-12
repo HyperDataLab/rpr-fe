@@ -1,2 +1,24 @@
 # Needed only for Worker registration and invitation routes.
 FIREBASE_WEB_API_KEY=
+FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"your-firebase-project","private_key_id":"placeholder","private_key":"-----BEGIN PRIVATE KEY-----\\nREPLACE_LOCALLY\\n-----END PRIVATE KEY-----\\n","client_email":"firebase-adminsdk@your-firebase-project.iam.gserviceaccount.com"}'
+RESEND_API_KEY=re_your_local_test_key
+RESEND_FROM_EMAIL="HyperDataLab <accounts@example.org>"
+
+# Google OAuth Web Application credentials. Set the callback URI to:
+# http://localhost:8787/auth/google/callback (local)
+# https://<your-worker-host>/auth/google/callback (production)
+GOOGLE_CLIENT_ID=your-oauth-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=replace-with-local-secret
+GOOGLE_REDIRECT_URI=http://localhost:8787/auth/google/callback
+GOOGLE_WORKSPACE_DOMAIN=example.org
+GOOGLE_ADMIN_EMAILS=admin@example.org
+
+# Generate 32 random bytes, base64 encode them, then use the same value in the
+# keyring JSON. Keep old key versions present during rotation until data is re-encrypted.
+TOKEN_ENCRYPTION_KEY_VERSION=v1
+TOKEN_ENCRYPTION_KEYS='{"v1":"replace-with-base64-encoded-32-byte-key"}'
+
+# Local browser origins only. Production values should be configured in Wrangler vars.
+ALLOWED_ORIGINS=http://localhost:3003,http://localhost:3000
+FRONTEND_URL=http://localhost:3003
+WORKSPACE_DELETE_ENABLED=false

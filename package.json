@@ -9,7 +9,10 @@
     "lint": "next lint",
     "seed": "node --env-file=.env.local scripts/seed-firebase-users.mjs",
     "seed:firebase-users": "npm run seed",
+    "seed:workspace-admin": "node --env-file=.env.local scripts/seed-workspace-admin.mjs",
     "worker:dev": "npx --yes wrangler@4.160.1 dev --config worker/wrangler.toml --port 8787",
+    "worker:test": "vitest run --config worker/vitest.config.mts",
+    "worker:migrate:remote": "npx --yes wrangler@4.160.1 d1 migrations apply researchpulse-workspace --remote --config worker/wrangler.toml",
     "worker:deploy": "npx --yes wrangler@4.160.1 deploy --config worker/wrangler.toml",
     "worker:tail": "npx --yes wrangler@4.160.1 tail --config worker/wrangler.toml"
   },
@@ -25,10 +28,12 @@
     "react-pdf": "^11.0.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "firebase-admin": "^14.5.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.1.0"
   }
 }

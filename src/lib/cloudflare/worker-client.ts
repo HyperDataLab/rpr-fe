@@ -16,8 +16,19 @@ export async function workerRequest<T>(path: string, init: RequestInit = {}): Pr
   headers.set('authorization', `Bearer ${token}`);
   const response = await fetch(`${baseUrl}${path}`, { ...init, headers, cache: 'no-store' });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { message?: string } | null;
-    throw new Error(body?.message || `Cloudflare Worker request failed (${response.status}).`);
+    const body = await response.json().catch(() => null) as {
+      message?: string;
+      error?: {
+        code?: string;
+        message?: string;
+        details?: { firebaseStatus?: number; firebaseCode?: string; firebaseMessage?: string | null; cleanupStage?: string } | null;
+      };
+    } | null;
+    const diagnostic = body?.error?.details;
+    const firebaseDetails = body?.error?.code === 'APP_USER_CLEANUP_FAILED' && diagnostic?.firebaseCode
+      ? ` (Firebase ${diagnostic.firebaseStatus ?? ''} ${diagnostic.firebaseCode}${diagnostic.cleanupStage ? `, ${diagnostic.cleanupStage}` : ''}${diagnostic.firebaseMessage ? `: ${diagnostic.firebaseMessage}` : ''})`
+      : '';
+    throw new Error(`${body?.error?.message || body?.message || `Cloudflare Worker request failed (${response.status}).`}${firebaseDetails}`);
   }
   return await response.json() as T;
 }

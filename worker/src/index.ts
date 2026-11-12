@@ -24,7 +24,23 @@ interface Env {
   FRONTEND_ORIGINS: string;
   GROBID_ORIGIN: string;
   GROBID_GATEWAY_TOKEN?: string;
+  DB: import('./workspace/types').D1Database;
+  ALLOWED_ORIGINS?: string;
+  FRONTEND_URL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT_URI?: string;
+  GOOGLE_WORKSPACE_DOMAIN?: string;
+  GOOGLE_ADMIN_EMAILS?: string;
+  TOKEN_ENCRYPTION_KEYS?: string;
+  TOKEN_ENCRYPTION_KEY_VERSION?: string;
+  WORKSPACE_DELETE_ENABLED?: string;
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+  RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
 }
+
+import { handleWorkspaceRequest } from './workspace';
 
 interface FirebaseClaims {
   sub: string;
@@ -33,6 +49,8 @@ interface FirebaseClaims {
   exp: number;
   iat: number;
   email?: string;
+  email_verified?: boolean;
+  firebase?: { sign_in_provider?: string };
 }
 
 interface FirestoreDocument {
@@ -76,7 +94,7 @@ async function firebaseKeys(): Promise<JsonWebKey[]> {
   return body.keys;
 }
 
-async function verifyFirebaseToken(request: Request, env: Env): Promise<FirebaseClaims> {
+export async function verifyFirebaseToken(request: Request, env: Env): Promise<FirebaseClaims> {
   const token = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) throw new Response('Firebase authentication is required.', { status: 401 });
   const parts = token.split('.');
@@ -86,7 +104,7 @@ async function verifyFirebaseToken(request: Request, env: Env): Promise<Firebase
   if (header.alg !== 'RS256' || typeof header.kid !== 'string') {
     throw new Response('Invalid Firebase ID token.', { status: 401 });
   }
-  const jwk = (await firebaseKeys()).find((key) => key.kid === header.kid);
+  const jwk = (await firebaseKeys()).find((key) => (key as JsonWebKey & { kid?: string }).kid === header.kid);
   if (!jwk) throw new Response('Firebase ID token signing key is unknown.', { status: 401 });
   const publicKey = await crypto.subtle.importKey(
     'jwk',
@@ -98,8 +116,8 @@ async function verifyFirebaseToken(request: Request, env: Env): Promise<Firebase
   const validSignature = await crypto.subtle.verify(
     'RSASSA-PKCS1-v1_5',
     publicKey,
-    base64UrlToBytes(parts[2]),
-    new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+    base64UrlToBytes(parts[2]).buffer as ArrayBuffer,
+    new TextEncoder().encode(`${parts[0]}.${parts[1]}`).buffer as ArrayBuffer,
   );
   const now = Math.floor(Date.now() / 1000);
   if (!validSignature || claims.aud !== env.FIREBASE_PROJECT_ID
@@ -145,15 +163,15 @@ async function firestoreGet(env: Env, token: string | undefined, collection: str
   return documentFields(await response.json() as FirestoreDocument);
 }
 
-async function firestoreCreate(env: Env, token: string, collection: string, id: string, values: Record<string, unknown>) {
+async function firestoreCreate(env: Env, collection: string, id: string, values: Record<string, unknown>) {
   const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(env.FIREBASE_PROJECT_ID)}/databases/(default)/documents/${collection}?documentId=${encodeURIComponent(id)}`;
   const fields = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, encodeFirestoreValue(value)]));
   const response = await fetch(url, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ fields }),
   });
-  if (!response.ok) throw new Response('Could not save the account profile.', { status: 502 });
+  if (!response.ok) throw new Response('Could not save your registration request.', { status: 502 });
 }
 
 function encodeFirestoreValue(value: unknown): Record<string, unknown> {
@@ -181,45 +199,16 @@ async function registerAccount(request: Request, env: Env) {
   if (!firstName || !lastName || !studentId || !major || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Response('Complete all required registration fields with a valid email.', { status: 400 });
   }
-  if (!env.FIREBASE_WEB_API_KEY) throw new Response('Firebase Auth is not configured on the Worker.', { status: 503 });
-  const temporaryPassword = `${crypto.randomUUID()}${crypto.randomUUID()}!`;
-  const createResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password: temporaryPassword, returnSecureToken: true }),
-  });
-  const created = await createResponse.json().catch(() => null) as { localId?: string; idToken?: string; error?: { message?: string } } | null;
-  if (!createResponse.ok || !created?.localId || !created.idToken) {
-    const duplicate = created?.error?.message === 'EMAIL_EXISTS';
-    throw new Response(duplicate ? 'This email already has an account.' : 'Could not create the Firebase account.', { status: duplicate ? 409 : 400 });
-  }
-
   const now = new Date().toISOString();
-  const name = `${firstName} ${lastName}`.trim();
-  const normalizedFirstName = firstName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd');
-  const initials = lastName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd')
-    .split(/\s+/).filter(Boolean).map((word) => word.charAt(0).toUpperCase()).join('');
-  const username = `${normalizedFirstName.charAt(0).toUpperCase()}${normalizedFirstName.slice(1).toLowerCase()}${initials}${studentId.toUpperCase()}`;
-  await firestoreCreate(env, created.idToken, 'userProfiles', created.localId, {
-    email, firstName, lastName, name, studentId, major, ...(phone ? { phone } : {}),
-    role: 'STUDENT', status: 'PENDING', isActive: false,
-    createdAt: now, updatedAt: now,
-  });
-  await firestoreCreate(env, created.idToken, 'registrationRequests', created.localId, {
+  const requestId = crypto.randomUUID();
+  // Registration only records the applicant's details. Firebase Auth and the
+  // application profile are created later, after admin approval and Workspace linking.
+  await firestoreCreate(env, 'registrationRequests', requestId, {
     email, firstName, lastName, studentId, major, ...(phone ? { phone } : {}),
     status: 'PENDING', createdAt: now,
   });
-
-  await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      requestType: 'VERIFY_EMAIL',
-      idToken: created.idToken,
-      continueUrl: `${env.FRONTEND_ORIGINS.split(',').map((item) => item.trim()).find(Boolean) || 'http://localhost:3003'}/login`,
-    }),
-  });
-  return json({ success: true, user: { email, name, username }, message: 'Registration request received. Verify your email and wait for administrator approval.' }, 201);
+  const name = `${firstName} ${lastName}`.trim();
+  return json({ success: true, requestId, user: { email, name }, message: 'Registration request received. An administrator will review it and contact you by email.' }, 201);
 }
 
 async function sendAccountSetupLink(request: Request, env: Env, identity: FirestoreIdentity, token: string) {
@@ -277,7 +266,7 @@ async function firestoreQuery(
     const fields = documentFields(row.document || null);
     if (!fields) return [];
     const id = row.document?.name?.split('/').pop();
-    return [{ ...fields, id }];
+    return [{ ...fields, id } as Record<string, unknown>];
   });
 }
 
@@ -329,9 +318,9 @@ async function canReadPublicationDetails(
 
 function corsHeaders(request: Request, env: Env) {
   const origin = request.headers.get('origin') || '';
-  const allow = env.FRONTEND_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean);
+  const allow = (env.ALLOWED_ORIGINS || env.FRONTEND_ORIGINS).split(',').map((item) => item.trim()).filter(Boolean);
   const headers = new Headers({
-    'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+    'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'access-control-allow-headers': 'authorization, content-type, range, if-range',
     'access-control-expose-headers': 'accept-ranges, content-range, content-length, etag',
     'access-control-max-age': '86400',
@@ -493,6 +482,43 @@ export default {
     }
 
     try {
+      if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST') {
+        const token = decodeFirestoreBearer(request);
+        let claims: FirebaseClaims;
+        try { claims = await verifyFirebaseToken(request, env); }
+        catch (error) {
+          const status = error instanceof Response ? error.status : 401;
+          return withCors(json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in with Google Workspace first.', details: null } }, status), request, env);
+        }
+        const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv, {
+          uid: claims.sub, role: 'STUDENT', email: claims.email, emailVerified: claims.email_verified === true,
+          signInProvider: claims.firebase?.sign_in_provider,
+        }, token);
+        if (workspaceResponse) return withCors(workspaceResponse, request, env);
+      }
+      if (url.pathname.startsWith('/auth/google/') || url.pathname.startsWith('/auth/workspace/') || url.pathname.startsWith('/api/workspace/')) {
+        if (url.pathname === '/auth/google/callback' && request.method === 'GET') {
+          const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
+          if (workspaceResponse) return withCors(workspaceResponse, request, env);
+        }
+        const token = decodeFirestoreBearer(request);
+        let identity: FirestoreIdentity;
+        let claims: FirebaseClaims;
+        try {
+          ({ identity, claims } = await requireIdentity(request, env, token));
+        } catch (error) {
+          const status = error instanceof Response ? error.status : 503;
+          const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'WORKSPACE_PERMISSION_DENIED' : 'IDENTITY_PROVIDER_UNAVAILABLE';
+          const message = status === 401 ? 'Firebase authentication is required.'
+            : status === 403 ? 'An active administrator account is required.' : 'Could not validate the application administrator.';
+          return withCors(json({ success: false, error: { code, message, details: null } }, status), request, env);
+        }
+        const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv, {
+          ...identity, email: claims.email, emailVerified: claims.email_verified === true,
+          signInProvider: claims.firebase?.sign_in_provider,
+        }, token);
+        if (workspaceResponse) return withCors(workspaceResponse, request, env);
+      }
       if (url.pathname === '/auth/register' && request.method === 'POST') {
         return withCors(await registerAccount(request, env), request, env);
       }

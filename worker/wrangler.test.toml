@@ -1,0 +1,16 @@
+name = "researchpulse-workspace-tests"
+main = "src/index.ts"
+compatibility_date = "2026-11-11"
+
+[vars]
+FIREBASE_PROJECT_ID = "test-firebase-project"
+FRONTEND_ORIGINS = "http://localhost:3003"
+ALLOWED_ORIGINS = "http://localhost:3003"
+FRONTEND_URL = "http://localhost:3003"
+WORKSPACE_DELETE_ENABLED = "false"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "researchpulse-workspace-tests-v2"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"
