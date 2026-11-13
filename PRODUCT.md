@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Students and authors submit and track academic manuscripts. Lecturers review assigned submissions, and administrators manage the publication workflow.
+Students and authors submit and track academic manuscripts. Lecturers review assigned submissions, administrators manage the publication workflow and create research projects, and members collaborate through project invitations.
 
 ## Product Purpose
 

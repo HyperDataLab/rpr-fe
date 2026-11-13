@@ -33,7 +33,7 @@ Errors use:
 
 ## Research projects
 
-All endpoints require an active, approved Firebase profile. Projects and their many-to-many membership/invitation records are stored in D1. Only exact username/email lookup is exposed; the API never lists all application users.
+All endpoints require an active, approved Firebase profile. Only `ADMIN` profiles can create projects; other project operations are available to active users according to their membership. Projects and their many-to-many membership/invitation records are stored in D1. Only exact username/email lookup is exposed; the API never lists all application users.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

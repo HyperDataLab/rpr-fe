@@ -1717,6 +1717,7 @@ async function handleResearchProjects(request: Request, env: WorkspaceEnv, ident
   }
   if (path === '/api/research-projects' && request.method === 'GET') return response(await researchProjectList(env, identity));
   if (path === '/api/research-projects' && request.method === 'POST') {
+    if (identity.role !== 'ADMIN') jsonError(403, 'PROJECT_ADMIN_REQUIRED', 'Only administrators can create research projects.');
     await rateLimit(env, identity.uid, 'research-project-create', 10, 600);
     const input = await parseJson(request);
     const title = typeof input.title === 'string' ? input.title.trim() : '';
