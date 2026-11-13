@@ -33,6 +33,8 @@ Errors use:
 
 ## Research projects
 
+For the planned OAuth API for external applications to read a user's active projects, see [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md). That partner API is a design and is not implemented yet; the endpoints below are the current Firebase-authenticated application API.
+
 All endpoints require an active, approved Firebase profile. Only `ADMIN` profiles can create projects; other project operations are available to active users according to their membership. Projects and their many-to-many membership/invitation records are stored in D1. Only exact username/email lookup is exposed; the API never lists all application users.
 
 | Method | Path | Purpose |
@@ -40,8 +42,9 @@ All endpoints require an active, approved Firebase profile. Only `ADMIN` profile
 | GET | `/api/research-projects` | Returns the caller's active projects and incoming pending invitations. |
 | POST | `/api/research-projects` | Creates a project `{ title, description?, researchArea? }` and an active owner membership. |
 | GET | `/api/research-projects/users?query=username-or-email` | Exact lookup of one active, approved account for invitations. |
-| GET | `/api/research-projects/:projectId` | Returns project details and active/pending members; caller must be an active member. |
+| GET | `/api/research-projects/:projectId` | Returns project details to an active member or the recipient of a pending invitation. Pending invitees receive a preview with active members only and can accept or decline from that page. |
 | POST | `/api/research-projects/:projectId/invitations` | Owner invites an existing user with `{ usernameOrEmail }`. Creates a pending membership, in-app notification, and Resend email. Response reports each delivery channel; invitation remains available if a delivery channel fails. |
+| POST | `/api/research-projects/:projectId/invitations/:uid/resend` | Owner resends the email for an existing pending invitation. Does not create another membership or in-app notification; response reports whether Resend accepted the email. Limited to 10 attempts per owner per 10 minutes. |
 | POST | `/api/research-projects/:projectId/invitations/:uid/accept` | The invited user accepts, making the membership active. |
 | POST | `/api/research-projects/:projectId/invitations/:uid/decline` | The invited user declines the pending invitation. |
 | DELETE | `/api/research-projects/:projectId/members/:uid` | Owner removes an active member, or a member leaves. Owner cannot leave through this route. |

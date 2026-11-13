@@ -10,7 +10,8 @@ import '@/styles/auth-forms.css';
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get('next') || '/student/my-preprints';
+  const requestedNextPath = searchParams.get('next');
+  const nextPath = requestedNextPath?.startsWith('/') && !requestedNextPath.startsWith('//') && !requestedNextPath.includes('\\') ? requestedNextPath : null;
   const ssoRequestId = searchParams.get('sso_request') || undefined;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,9 +28,10 @@ function LoginForm() {
       setLoading(false);
       return;
     }
-    if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
+    if (nextPath) window.location.href = nextPath;
+    else if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
     else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
-    else window.location.href = nextPath;
+    else window.location.href = '/student/my-preprints';
   };
 
   const handleWorkspaceLogin = async () => {
@@ -43,9 +45,10 @@ function LoginForm() {
         return;
       }
       if (data.ssoRedirectUrl) window.location.assign(data.ssoRedirectUrl);
+      else if (nextPath) window.location.href = nextPath;
       else if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
       else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
-      else window.location.href = nextPath;
+      else window.location.href = '/student/my-preprints';
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Google Workspace sign-in failed.');
       setLoading(false);

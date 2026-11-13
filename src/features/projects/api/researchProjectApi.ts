@@ -17,6 +17,7 @@ export interface ResearchProject {
   createdAt: string;
   updatedAt: string;
   membershipRole: 'OWNER' | 'MEMBER';
+  membershipStatus?: 'ACTIVE' | 'INVITED';
   owner: ResearchUser | null;
 }
 
@@ -39,6 +40,7 @@ export const researchProjectApi = {
   findUser: async (query: string) => unwrap(await workerRequest<Envelope<{ user: ResearchUser | null }>>(`/api/research-projects/users?query=${encodeURIComponent(query)}`)),
   detail: async (id: string) => unwrap(await workerRequest<Envelope<ResearchProject & { members: ResearchProjectMember[] }>>(`/api/research-projects/${encodeURIComponent(id)}`)),
   invite: async (id: string, usernameOrEmail: string) => unwrap(await workerRequest<Envelope<{ invited: boolean; notificationSent: boolean; emailSent: boolean }>>(`/api/research-projects/${encodeURIComponent(id)}/invitations`, json({ usernameOrEmail }))),
+  resendInvitation: async (projectId: string, uid: string) => unwrap(await workerRequest<Envelope<{ emailSent: boolean }>>(`/api/research-projects/${encodeURIComponent(projectId)}/invitations/${encodeURIComponent(uid)}/resend`, json({}))),
   respond: async (projectId: string, uid: string, action: 'accept' | 'decline') => unwrap(await workerRequest<Envelope<{ status: string }>>(`/api/research-projects/${encodeURIComponent(projectId)}/invitations/${encodeURIComponent(uid)}/${action}`, json({}))),
   removeMember: async (projectId: string, uid: string) => unwrap(await workerRequest<Envelope<{ removed: boolean }>>(`/api/research-projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(uid)}`, { method: 'DELETE' })),
 };

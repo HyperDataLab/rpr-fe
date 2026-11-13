@@ -98,6 +98,7 @@
 .iconButton:focus-visible,
 .backButton:focus-visible,
 .removeButton:focus-visible,
+.resendButton:focus-visible,
 .projectItem:focus-visible,
 .tab:focus-visible,
 .tabActive:focus-visible {
@@ -108,6 +109,7 @@
 .primaryButton:disabled,
 .secondaryButton:disabled,
 .iconButton:disabled,
+.resendButton:disabled,
 .removeButton:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .createForm {
@@ -127,8 +129,7 @@
 .listToolbar,
 .sectionHeading,
 .projectMeta,
-.memberActions,
-.invitationActions {
+.memberActions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -302,13 +303,15 @@
 .projectText { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .projectText strong,
 .projectText h3 { overflow: hidden; margin: 0; color: #1f3546; font-size: 0.9375rem; font-weight: 650; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.invitationTitleButton { width: fit-content; max-width: 100%; overflow: hidden; border: 0; padding: 0; color: #075b91; background: transparent; font: inherit; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.invitationTitleButton:hover { color: #004d82; text-decoration: underline; }
+.invitationTitleButton:focus-visible { outline: 3px solid rgb(0 113 188 / 30%); outline-offset: 3px; border-radius: 2px; }
 .projectText > span,
 .projectText p,
 .projectText small { overflow: hidden; margin: 0; color: #53697b; font-size: 0.8125rem; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .roleTag { flex: 0 0 auto; border-radius: 999px; padding: 4px 8px; color: #42596b; background: #eef3f6; font-size: 0.75rem; font-weight: 600; }
 .invitationItem { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 12px; }
 .invitationItem .projectIdentity { flex: 1; }
-.invitationActions { flex: 0 0 auto; }
 
 .emptyList,
 .detailEmpty {
@@ -337,9 +340,14 @@
 .detailTitleRow p { margin: 5px 0 0; color: #53697b; font-size: 0.875rem; }
 .projectMeta { justify-content: flex-start; flex-wrap: wrap; margin-top: 16px; color: #53697b; font-size: 0.8125rem; }
 .statusDot { width: 8px; height: 8px; border-radius: 50%; background: #159455; box-shadow: 0 0 0 3px #e6f5ed; }
+.pendingDot { width: 8px; height: 8px; border-radius: 50%; background: #c58a19; box-shadow: 0 0 0 3px #fbf2dc; }
 .metaDivider { width: 1px; height: 16px; margin: 0 2px; background: #d9e3ea; }
 
 .detailBody { display: grid; gap: 24px; padding: 22px 26px 28px; }
+.invitationDecision { display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid #cfe3ef; border-radius: 12px; padding: 18px 20px; background: #f3f9fc; }
+.invitationDecision h3 { margin: 0; color: #1f3546; font-size: 1rem; line-height: 1.4; }
+.invitationDecision p { max-width: 60ch; margin: 5px 0 0; color: #4b6274; font-size: 0.875rem; line-height: 1.5; }
+.invitationDecisionActions { display: flex; flex: 0 0 auto; gap: 8px; }
 .descriptionSection h3,
 .sectionHeading h3 { margin: 0; color: #223a4c; font-size: 0.9375rem; line-height: 1.4; font-weight: 700; }
 .descriptionSection p { max-width: 72ch; margin: 8px 0 0; color: #40596b; font-size: 0.9375rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -365,7 +373,10 @@
 .memberState { color: #53697b; font-size: 0.75rem; font-weight: 600; text-align: right; }
 .ownerState { color: #075b91; }
 .pendingState { color: #875d16; }
-.removeButton { min-height: 36px; border: 1px solid #d7e1e8; border-radius: 7px; padding: 6px 9px; color: #40596b; background: #fff; font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+.resendButton,
+.removeButton { min-height: 36px; border: 1px solid #c9dce8; border-radius: 7px; padding: 6px 9px; color: #075b91; background: #fff; font: inherit; font-size: 0.75rem; font-weight: 650; cursor: pointer; }
+.resendButton:hover:not(:disabled) { border-color: #9dc8df; background: #f1f8fc; }
+.removeButton { border-color: #d7e1e8; color: #40596b; font-weight: 600; }
 .removeButton:hover:not(:disabled) { border-color: #e4b7b2; color: #a12b23; background: #fff8f7; }
 .memberEmpty { margin: 14px 0 0; color: #53697b; font-size: 0.875rem; }
 .backButton,
@@ -404,6 +415,8 @@
   .projectItem { min-height: 68px; }
   .detailHeader { padding: 16px; }
   .detailBody { gap: 20px; padding: 18px 16px; }
+  .invitationDecision { align-items: stretch; flex-direction: column; gap: 14px; padding: 16px; }
+  .invitationDecisionActions { display: grid; grid-template-columns: 1fr 1fr; }
   .backButton.mobileOnly { position: static; display: inline-flex; width: auto; height: 40px; align-items: center; gap: 8px; margin: -4px 0 16px; border: 0; padding: 0 8px 0 0; overflow: visible; clip: auto; color: #075b91; background: transparent; font: inherit; font-size: 0.875rem; font-weight: 650; white-space: normal; clip-path: none; cursor: pointer; }
   .detailTitleRow h2 { font-size: 1.125rem; }
   .lookupForm { align-items: stretch; flex-direction: column; }
@@ -413,7 +426,6 @@
   .memberRow { align-items: flex-start; }
   .memberActions { align-items: flex-end; }
   .invitationItem { display: grid; gap: 12px; }
-  .invitationActions { display: grid; grid-template-columns: 1fr 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

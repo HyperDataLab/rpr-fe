@@ -1654,12 +1654,13 @@ async function sendResearchInvitation(env: WorkspaceEnv, to: string, recipient: 
   if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) throw new Error('Invitation email delivery is not configured.');
   const safe = (value: string) => htmlEscape(value);
   const link = new URL(`/projects?project=${encodeURIComponent(projectId)}`, env.FRONTEND_URL).toString();
-  const text = `${inviter} invited you to join the research project “${projectTitle}” on HyperDataLab. Sign in to accept or decline: ${link}`;
-  const html = `<p>${safe(inviter)} invited you to join the research project <b>${safe(projectTitle)}</b> on HyperDataLab.</p><p><a href="${safe(link)}">Review invitation</a></p>`;
+  const recipientName = recipient || 'bạn';
+  const text = `Xin chào ${recipientName},\n\n${inviter} đã mời bạn tham gia dự án nghiên cứu trên HyperDataLab:\n${projectTitle}\n\nĐăng nhập vào HyperDataLab để xem và chấp nhận hoặc từ chối lời mời: ${link}\n\nNếu bạn không mong đợi lời mời này, bạn có thể bỏ qua email.`;
+  const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#f3f6fa;padding:32px 12px;font-family:Arial,Helvetica,sans-serif;color:#172033"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${safe(inviter)} đã mời bạn tham gia dự án ${safe(projectTitle)} trên HyperDataLab.</div><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e1e8f0;border-radius:14px;overflow:hidden"><tr><td style="padding:24px 32px;border-bottom:1px solid #e8edf3"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="width:38px;height:38px;background:#eaf5ff;border-radius:10px;text-align:center;vertical-align:middle;color:#0879c9;font:bold 16px Arial">HD</td><td style="padding-left:11px;font:bold 18px Arial,sans-serif;color:#172033">HyperDataLab</td></tr></table></td></tr><tr><td style="padding:30px 32px 10px"><div style="display:inline-block;background:#eaf5ff;color:#075b91;font:600 12px Arial,sans-serif;padding:6px 10px;border-radius:20px">LỜI MỜI DỰ ÁN</div><h1 style="font:700 24px/1.3 Arial,sans-serif;color:#172033;margin:18px 0 10px">Cùng tham gia dự án nghiên cứu</h1><p style="font:15px/1.65 Arial,sans-serif;color:#526176;margin:0">Xin chào ${safe(recipientName)}, <b style="color:#263f52">${safe(inviter)}</b> đã mời bạn cộng tác trên HyperDataLab.</p></td></tr><tr><td style="padding:18px 32px 24px"><div style="background:#f8fafc;border:1px solid #e3eaf2;border-radius:10px;padding:18px 20px"><div style="font:600 12px Arial,sans-serif;color:#53697b;margin-bottom:8px">DỰ ÁN NGHIÊN CỨU</div><div style="font:700 18px/1.45 Arial,sans-serif;color:#172b3a;overflow-wrap:anywhere">${safe(projectTitle)}</div><div style="font:14px/1.5 Arial,sans-serif;color:#53697b;margin-top:7px">Được mời bởi ${safe(inviter)}</div></div></td></tr><tr><td style="padding:0 32px 28px"><p style="font:15px/1.65 Arial,sans-serif;color:#526176;margin:0 0 18px">Mở dự án để xem thông tin và chọn chấp nhận hoặc từ chối lời mời.</p><a href="${safe(link)}" style="display:inline-block;background:#0879c9;color:#fff;text-decoration:none;font:600 15px Arial,sans-serif;padding:13px 22px;border-radius:8px">Xem lời mời</a><p style="font:12px/1.6 Arial,sans-serif;color:#617184;margin:18px 0 0">Nếu nút không hoạt động, sao chép liên kết này vào trình duyệt:<br><a href="${safe(link)}" style="color:#075b91;word-break:break-all">${safe(link)}</a></p></td></tr><tr><td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e8edf3;font:12px/1.6 Arial,sans-serif;color:#53697b">Nếu bạn không mong đợi email này, hãy bỏ qua. Đây là thư tự động từ HyperDataLab, vui lòng không trả lời.</td></tr></table></body></html>`;
   const result = await fetch('https://api.resend.com/emails', {
     method: 'POST', signal: AbortSignal.timeout(12000),
     headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject: `HyperDataLab | Invitation to ${projectTitle}`, text: `${recipient}, ${text}`, html }),
+    body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject: `HyperDataLab | Lời mời tham gia ${projectTitle}`, text, html }),
   });
   if (!result.ok) throw new Error('Project invitation email delivery failed.');
 }
@@ -1694,15 +1695,16 @@ async function getResearchProfileByUid(env: WorkspaceEnv, uid: string): Promise<
 
 async function researchProjectDetail(env: WorkspaceEnv, projectId: string, identity: WorkspaceIdentity) {
   const project = await env.DB.prepare(`SELECT p.id, p.title, p.description, p.research_area AS researchArea, p.owner_uid AS ownerUid,
-    p.created_at AS createdAt, p.updated_at AS updatedAt, m.role AS membershipRole
+    p.created_at AS createdAt, p.updated_at AS updatedAt, m.role AS membershipRole, m.status AS membershipStatus
     FROM research_projects p JOIN research_project_members m ON m.project_id = p.id
-    WHERE p.id = ? AND m.user_uid = ? AND m.status = 'ACTIVE'`).bind(projectId, identity.uid).first<Record<string, unknown>>();
+    WHERE p.id = ? AND m.user_uid = ? AND m.status IN ('ACTIVE', 'INVITED')`).bind(projectId, identity.uid).first<Record<string, unknown>>();
   if (!project) jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.');
   const rows = await env.DB.prepare(`SELECT user_uid AS userUid, role, status, invited_by_uid AS invitedByUid,
     invitation_email_status AS invitationEmailStatus, created_at AS createdAt, responded_at AS respondedAt
-    FROM research_project_members WHERE project_id = ? AND status IN ('ACTIVE', 'INVITED') ORDER BY role DESC, created_at ASC`).bind(projectId).all<Record<string, unknown>>();
+    FROM research_project_members WHERE project_id = ? AND (status = 'ACTIVE' OR (status = 'INVITED' AND ? = 'ACTIVE')) ORDER BY role DESC, created_at ASC`)
+    .bind(projectId, project.membershipStatus).all<Record<string, unknown>>();
   const members = await Promise.all((rows.results || []).map(async (member) => ({ ...member, user: await getResearchProfileByUid(env, String(member.userUid)) })));
-  return { ...project, members };
+  return { ...project, owner: await getResearchProfileByUid(env, String(project.ownerUid)), members };
 }
 
 async function handleResearchProjects(request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity) {
@@ -1769,6 +1771,30 @@ async function handleResearchProjects(request: Request, env: WorkspaceEnv, ident
     await env.DB.prepare('UPDATE research_project_members SET invitation_email_status = ?, updated_at = ? WHERE project_id = ? AND user_uid = ? AND status = \'INVITED\'')
       .bind(emailSent ? 'SENT' : 'FAILED', new Date().toISOString(), projectId, invitee.uid).run();
     return response({ invited: true, notificationSent, emailSent }, emailSent && notificationSent ? 'Invitation sent.' : 'Invitation created; one or more notifications could not be delivered.', 201);
+  }
+  const resendInvitationMatch = path.match(/^\/api\/research-projects\/([^/]+)\/invitations\/([^/]+)\/resend$/);
+  if (resendInvitationMatch && request.method === 'POST') {
+    const projectId = decodeURIComponent(resendInvitationMatch[1]);
+    const targetUid = decodeURIComponent(resendInvitationMatch[2]);
+    await rateLimit(env, identity.uid, 'research-project-invitation-resend', 10, 600);
+    const project = await env.DB.prepare('SELECT id, title, owner_uid AS ownerUid FROM research_projects WHERE id = ?').bind(projectId).first<{ id: string; title: string; ownerUid: string }>();
+    if (!project) jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.');
+    if (project.ownerUid !== identity.uid) jsonError(403, 'PROJECT_OWNER_REQUIRED', 'Only the project owner can resend invitations.');
+    const membership = await env.DB.prepare("SELECT status FROM research_project_members WHERE project_id = ? AND user_uid = ?").bind(projectId, targetUid).first<{ status: string }>();
+    if (membership?.status !== 'INVITED') jsonError(409, 'INVITATION_NOT_PENDING', 'Only a pending invitation can be resent.');
+    const invitee = await getResearchProfileByUid(env, targetUid);
+    if (!invitee) jsonError(409, 'INVITEE_UNAVAILABLE', 'The invited account is no longer active.');
+    const inviter = await getResearchProfileByUid(env, identity.uid);
+    let emailSent = false;
+    try {
+      await sendResearchInvitation(env, invitee.email, invitee.name, inviter?.name || 'A HyperDataLab user', project.title, projectId);
+      emailSent = true;
+    } catch (error) { console.error('Project invitation email resend failed', error instanceof Error ? error.message : 'unknown'); }
+    const updated = await env.DB.prepare("UPDATE research_project_members SET invitation_email_status = ?, updated_at = ? WHERE project_id = ? AND user_uid = ? AND status = 'INVITED'")
+      .bind(emailSent ? 'SENT' : 'FAILED', new Date().toISOString(), projectId, targetUid).run();
+    if (!updated.meta?.changes) jsonError(409, 'INVITATION_NOT_PENDING', 'This invitation is no longer pending.');
+    await audit(env, identity.uid, 'RESEARCH_PROJECT_INVITATION_EMAIL_RESENT', emailSent ? 'SUCCESS' : 'FAILED', targetUid, `project:${projectId}`);
+    return response({ emailSent }, emailSent ? 'Invitation email resent.' : 'Invitation is still pending, but the email could not be delivered.');
   }
   const responseMatch = path.match(/^\/api\/research-projects\/([^/]+)\/invitations\/([^/]+)\/(accept|decline)$/);
   if (responseMatch && request.method === 'POST') {

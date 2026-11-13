@@ -40,6 +40,7 @@ export function ResearchProjectsView() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [resendingUid, setResendingUid] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -54,13 +55,13 @@ export function ResearchProjectsView() {
     projects: 'Dự án của tôi', invitations: 'Lời mời', search: 'Tìm theo tên hoặc lĩnh vực', active: 'Đang tham gia', owner: 'Chủ dự án', member: 'Thành viên',
     createTitle: 'Tạo dự án nghiên cứu', createHelp: 'Bắt đầu bằng thông tin cơ bản. Bạn có thể mời thành viên sau khi tạo.', name: 'Tên dự án', namePlaceholder: 'Ví dụ: Phân tích xu hướng công bố khoa học', area: 'Lĩnh vực nghiên cứu', areaPlaceholder: 'Ví dụ: Khoa học dữ liệu', description: 'Mô tả dự án', descriptionPlaceholder: 'Mục tiêu, phạm vi hoặc nội dung chính của dự án', cancel: 'Hủy', save: 'Tạo dự án', saving: 'Đang tạo…',
     pending: 'Đang chờ phản hồi', invitedBy: 'Người mời', accept: 'Chấp nhận lời mời', decline: 'Từ chối', noProjects: 'Chưa có dự án nào', noProjectsHelp: isAdmin ? 'Tạo dự án nghiên cứu đầu tiên, sau đó mời các thành viên cùng tham gia.' : 'Các dự án bạn tham gia sẽ xuất hiện tại đây.', noInvites: 'Không có lời mời đang chờ', noInvitesHelp: 'Khi có người mời bạn vào dự án, lời mời sẽ hiển thị tại đây.',
-    selectProject: 'Chọn một dự án', selectProjectHelp: 'Chọn dự án trong danh sách để xem thông tin và thành viên.', members: 'Thành viên dự án', invite: 'Mời thành viên', inviteHelp: 'Tìm tài khoản HyperData Lab bằng username hoặc email.', lookup: 'Tìm tài khoản', lookupBusy: 'Đang tìm…', invitePlaceholder: 'Username hoặc email', sendInvite: 'Gửi lời mời', sending: 'Đang gửi…', activeMembers: 'Đang tham gia', invited: 'Đã mời', emailFailed: 'Gửi email thất bại', remove: 'Gỡ khỏi dự án', removeConfirm: 'Bạn có chắc muốn gỡ thành viên này khỏi dự án?', retry: 'Thử lại', loading: 'Đang tải dự án…', projectCreated: 'Đã tạo dự án.', inviteDelivered: 'Đã gửi lời mời qua ứng dụng và email.', invitePartial: 'Đã tạo lời mời, nhưng có kênh thông báo chưa gửi được.', lookupEmpty: 'Không tìm thấy tài khoản đang hoạt động.',
+    selectProject: 'Chọn một dự án', selectProjectHelp: 'Chọn dự án trong danh sách để xem thông tin và thành viên.', members: 'Thành viên dự án', invite: 'Mời thành viên', inviteHelp: 'Tìm tài khoản HyperData Lab bằng username hoặc email.', lookup: 'Tìm tài khoản', lookupBusy: 'Đang tìm…', invitePlaceholder: 'Username hoặc email', sendInvite: 'Gửi lời mời', sending: 'Đang gửi…', resendEmail: 'Gửi lại email', resendingEmail: 'Đang gửi email…', invitationResent: 'Đã gửi lại email mời.', invitationResendFailed: 'Gửi lại email mời thất bại. Lời mời vẫn đang chờ phản hồi.', invitationPending: 'Lời mời đang chờ bạn phản hồi', invitationDecisionHelp: 'Xem thông tin dự án và các thành viên đang tham gia, sau đó chọn có tham gia dự án hay không.', invitationUnavailable: 'Lời mời này không còn tồn tại hoặc đã được phản hồi.', ownerLabel: 'Chủ dự án', openDetails: 'Xem thông tin dự án', activeMembers: 'Đang tham gia', invited: 'Đã mời', emailFailed: 'Gửi email thất bại', remove: 'Gỡ khỏi dự án', removeConfirm: 'Bạn có chắc muốn gỡ thành viên này khỏi dự án?', retry: 'Thử lại', loading: 'Đang tải dự án…', projectCreated: 'Đã tạo dự án.', inviteDelivered: 'Đã gửi lời mời qua ứng dụng và email.', invitePartial: 'Đã tạo lời mời, nhưng có kênh thông báo chưa gửi được.', lookupEmpty: 'Không tìm thấy tài khoản đang hoạt động.',
   } : {
     title: 'Research projects', subtitle: 'A shared workspace for scientific research teams.', create: 'Create project',
     projects: 'My projects', invitations: 'Invitations', search: 'Search by project or research area', active: 'Active', owner: 'Project owner', member: 'Member',
     createTitle: 'Create a research project', createHelp: 'Start with the essentials. You can invite members after creating the project.', name: 'Project name', namePlaceholder: 'e.g. Trends in scientific publishing', area: 'Research area', areaPlaceholder: 'e.g. Data science', description: 'Project description', descriptionPlaceholder: 'Goals, scope, or a short project overview', cancel: 'Cancel', save: 'Create project', saving: 'Creating…',
     pending: 'Waiting for your response', invitedBy: 'Invited by', accept: 'Accept invitation', decline: 'Decline', noProjects: 'No projects yet', noProjectsHelp: isAdmin ? 'Create your first research project, then invite collaborators to join.' : 'Projects you join will appear here.', noInvites: 'No pending invitations', noInvitesHelp: 'Invitations to join research projects will appear here.',
-    selectProject: 'Select a project', selectProjectHelp: 'Choose a project from the list to see its details and members.', members: 'Project members', invite: 'Invite a member', inviteHelp: 'Find a HyperData Lab account by username or email.', lookup: 'Find account', lookupBusy: 'Searching…', invitePlaceholder: 'Username or email', sendInvite: 'Send invitation', sending: 'Sending…', activeMembers: 'Active', invited: 'Invited', emailFailed: 'Email failed', remove: 'Remove from project', removeConfirm: 'Are you sure you want to remove this member from the project?', retry: 'Try again', loading: 'Loading projects…', projectCreated: 'Project created.', inviteDelivered: 'Invitation sent in app and by email.', invitePartial: 'Invitation created, but one notification channel could not deliver it.', lookupEmpty: 'No active account found.',
+    selectProject: 'Select a project', selectProjectHelp: 'Choose a project from the list to see its details and members.', members: 'Project members', invite: 'Invite a member', inviteHelp: 'Find a HyperData Lab account by username or email.', lookup: 'Find account', lookupBusy: 'Searching…', invitePlaceholder: 'Username or email', sendInvite: 'Send invitation', sending: 'Sending…', resendEmail: 'Resend email', resendingEmail: 'Sending email…', invitationResent: 'Invitation email resent.', invitationResendFailed: 'Could not resend the invitation email. The invitation is still pending.', invitationPending: 'Invitation awaiting your response', invitationDecisionHelp: 'Review the project and its current members, then decide whether to join.', invitationUnavailable: 'This invitation is no longer available or has already been answered.', ownerLabel: 'Project owner', openDetails: 'View project details', activeMembers: 'Active', invited: 'Invited', emailFailed: 'Email failed', remove: 'Remove from project', removeConfirm: 'Are you sure you want to remove this member from the project?', retry: 'Try again', loading: 'Loading projects…', projectCreated: 'Project created.', inviteDelivered: 'Invitation sent in app and by email.', invitePartial: 'Invitation created, but one notification channel could not deliver it.', lookupEmpty: 'No active account found.',
   }, [isAdmin, isVi]);
 
   const refresh = useCallback(async (preferredId?: string | null, preserveSelection = true) => {
@@ -71,18 +72,27 @@ export function ResearchProjectsView() {
       setProjects(result.projects);
       setInvitations(result.invitations);
       const target = preferredId || (preserveSelection ? detail?.id : null);
-      if (target && result.projects.some((item) => item.id === target)) setDetail(await researchProjectApi.detail(target));
-      else setDetail(null);
+      if (target && result.projects.some((item) => item.id === target)) {
+        setMode('projects');
+        setDetail(await researchProjectApi.detail(target));
+      } else if (target && result.invitations.some((item) => item.id === target)) {
+        setMode('invitations');
+        setDetail(await researchProjectApi.detail(target));
+      } else {
+        setDetail(null);
+        if (target) setError(text.invitationUnavailable);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : (isVi ? 'Không tải được danh sách dự án.' : 'Could not load projects.'));
     } finally { setLoading(false); }
-  }, [detail?.id, isVi]);
+  }, [detail?.id, isVi, text.invitationUnavailable]);
 
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
       setLoading(false);
-      router.replace('/login');
+      const next = selectedFromUrl ? `/projects?project=${encodeURIComponent(selectedFromUrl)}` : '/projects';
+      router.replace(`/login?next=${encodeURIComponent(next)}`);
       return;
     }
     void refresh(selectedFromUrl);
@@ -95,6 +105,15 @@ export function ResearchProjectsView() {
       setDetail(await researchProjectApi.detail(project.id));
       router.replace(`/projects?project=${encodeURIComponent(project.id)}`, { scroll: false });
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not open project.'); }
+  };
+
+  const openInvitation = async (project: ResearchProject) => {
+    setError('');
+    setMode('invitations');
+    try {
+      setDetail(await researchProjectApi.detail(project.id));
+      router.replace(`/projects?project=${encodeURIComponent(project.id)}`, { scroll: false });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : text.invitationUnavailable); }
   };
 
   const closeDetail = () => {
@@ -139,6 +158,17 @@ export function ResearchProjectsView() {
     finally { setBusy(false); }
   };
 
+  const resendInvitation = async (member: ResearchProjectMember) => {
+    if (!detail || detail.membershipRole !== 'OWNER' || member.status !== 'INVITED') return;
+    setBusy(true); setResendingUid(member.userUid); setError(''); setNotice('');
+    try {
+      const result = await researchProjectApi.resendInvitation(detail.id, member.userUid);
+      setNotice(result.emailSent ? text.invitationResent : text.invitationResendFailed);
+      await refresh(detail.id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : text.invitationResendFailed); }
+    finally { setBusy(false); setResendingUid(null); }
+  };
+
   const respond = async (project: ResearchProject, action: 'accept' | 'decline') => {
     const uid = firebaseAuth().currentUser?.uid;
     if (!uid) return;
@@ -149,7 +179,10 @@ export function ResearchProjectsView() {
         setMode('projects');
         await refresh(project.id, false);
         router.replace(`/projects?project=${encodeURIComponent(project.id)}`, { scroll: false });
-      } else await refresh(null, false);
+      } else {
+        await refresh(null, false);
+        router.replace('/projects', { scroll: false });
+      }
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not respond to invitation.'); }
     finally { setBusy(false); }
@@ -223,8 +256,7 @@ export function ResearchProjectsView() {
               </div>
                 : <ul className={styles.projectList}>{currentItems.map((project) => mode === 'invitations'
                   ? <li className={styles.projectRow} key={project.id}><article className={styles.invitationItem}>
-                    <div className={styles.projectIdentity}><span className={styles.projectIcon}><ProjectMark /></span><div className={styles.projectText}><h3>{project.title}</h3><p>{text.invitedBy} {project.owner?.name || project.owner?.email || '—'}</p>{project.researchArea && <small>{project.researchArea}</small>}</div></div>
-                    <div className={styles.invitationActions}><button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => void respond(project, 'decline')}>{text.decline}</button><button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void respond(project, 'accept')}>{text.accept}</button></div>
+                    <div className={styles.projectIdentity}><span className={styles.projectIcon}><ProjectMark /></span><div className={styles.projectText}><button type="button" className={styles.invitationTitleButton} aria-label={`${text.openDetails}: ${project.title}`} onClick={() => void openInvitation(project)}>{project.title}</button><p>{text.invitedBy} {project.owner?.name || project.owner?.email || '—'}</p>{project.researchArea && <small>{project.researchArea}</small>}</div></div>
                   </article></li>
                   : <li className={styles.projectRow} key={project.id}><button type="button" className={`${styles.projectItem} ${detail?.id === project.id ? styles.projectItemSelected : ''}`} onClick={() => void openProject(project)} aria-pressed={detail?.id === project.id}>
                     <span className={styles.projectIcon}><ProjectMark /></span><span className={styles.projectText}><strong>{project.title}</strong><span>{project.researchArea || (isVi ? 'Chưa có lĩnh vực' : 'No research area')}</span></span><span className={styles.roleTag}>{project.membershipRole === 'OWNER' ? text.owner : text.member}</span>
@@ -237,9 +269,13 @@ export function ResearchProjectsView() {
           <div className={styles.detailHeader}>
             <button type="button" className={`${styles.backButton} ${styles.mobileOnly}`} onClick={closeDetail}>← <span>{text.projects}</span></button>
             <div className={styles.detailTitleRow}><span className={styles.detailIcon}><ProjectMark size={25} /></span><div><h2>{detail.title}</h2><p>{detail.researchArea || (isVi ? 'Chưa chỉ định lĩnh vực' : 'Research area not specified')}</p></div></div>
-            <div className={styles.projectMeta}><span className={styles.statusDot} />{text.active}<span className={styles.metaDivider} /><MemberMark />{detail.members.filter((member) => member.status === 'ACTIVE').length} {isVi ? 'thành viên' : 'members'}</div>
+            <div className={styles.projectMeta}><span className={detail.membershipStatus === 'INVITED' ? styles.pendingDot : styles.statusDot} />{detail.membershipStatus === 'INVITED' ? text.invitationPending : text.active}<span className={styles.metaDivider} /><MemberMark />{detail.members.filter((member) => member.status === 'ACTIVE').length} {isVi ? 'thành viên' : 'members'}<span className={styles.metaDivider} />{text.ownerLabel}: {detail.owner?.name || detail.owner?.email || '—'}</div>
           </div>
           <div className={styles.detailBody}>
+            {detail.membershipStatus === 'INVITED' && <section className={styles.invitationDecision} aria-labelledby="project-invitation-decision-title">
+              <div><h3 id="project-invitation-decision-title">{text.invitationPending}</h3><p>{text.invitationDecisionHelp}</p></div>
+              <div className={styles.invitationDecisionActions}><button type="button" className={styles.secondaryButton} disabled={busy} onClick={() => void respond(detail, 'decline')}>{text.decline}</button><button type="button" className={styles.primaryButton} disabled={busy} onClick={() => void respond(detail, 'accept')}>{busy ? text.sending : text.accept}</button></div>
+            </section>}
             <section className={styles.descriptionSection}><h3>{text.description}</h3><p>{detail.description || (isVi ? 'Chưa có mô tả cho dự án này.' : 'No description has been added to this project.')}</p></section>
             {detail.membershipRole === 'OWNER' && <section className={styles.inviteSection}>
               <div className={styles.sectionHeading}><div><h3>{text.invite}</h3><p>{text.inviteHelp}</p></div><span className={styles.sectionIcon}><MemberMark /></span></div>
@@ -248,7 +284,7 @@ export function ResearchProjectsView() {
             </section>}
             <section className={styles.membersSection}>
               <div className={styles.sectionHeading}><div><h3>{text.members}</h3><p>{detail.members.filter((member) => member.status === 'ACTIVE').length} {text.activeMembers.toLowerCase()}</p></div><span className={styles.memberCount}>{detail.members.filter((member) => member.status === 'ACTIVE').length}</span></div>
-              {detail.members.length === 0 ? <p className={styles.memberEmpty}>{isVi ? 'Chưa có thành viên khác trong dự án.' : 'No other members have joined this project.'}</p> : <ul className={styles.memberList}>{detail.members.map((member) => <MemberRow key={member.userUid} member={member} isOwner={detail.membershipRole === 'OWNER'} busy={busy} isVi={isVi} text={text} onRemove={() => void removeMember(member)} />)}</ul>}
+              {detail.members.length === 0 ? <p className={styles.memberEmpty}>{isVi ? 'Chưa có thành viên khác trong dự án.' : 'No other members have joined this project.'}</p> : <ul className={styles.memberList}>{detail.members.map((member) => <MemberRow key={member.userUid} member={member} isOwner={detail.membershipRole === 'OWNER'} busy={busy} resending={resendingUid === member.userUid} isVi={isVi} text={text} onRemove={() => void removeMember(member)} onResend={() => void resendInvitation(member)} />)}</ul>}
             </section>
           </div>
         </> : <div className={styles.detailEmpty}><span className={styles.detailEmptyIcon}><ProjectMark size={28} /></span><h2>{text.selectProject}</h2><p>{text.selectProjectHelp}</p></div>}
@@ -261,7 +297,7 @@ export function ResearchProjectsView() {
   return <StudentDashboardLayout title={text.title}>{content}</StudentDashboardLayout>;
 }
 
-function MemberRow({ member, isOwner, busy, isVi, text, onRemove }: { member: ResearchProjectMember; isOwner: boolean; busy: boolean; isVi: boolean; text: Record<string, string>; onRemove: () => void }) {
+function MemberRow({ member, isOwner, busy, resending, isVi, text, onRemove, onResend }: { member: ResearchProjectMember; isOwner: boolean; busy: boolean; resending: boolean; isVi: boolean; text: Record<string, string>; onRemove: () => void; onResend: () => void }) {
   const person = member.user;
   const initials = (person?.name || person?.username || person?.email || 'U').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
   const ownerLabel = isVi ? 'Chủ dự án' : 'Project owner';
@@ -269,6 +305,7 @@ function MemberRow({ member, isOwner, busy, isVi, text, onRemove }: { member: Re
     <span className={`${styles.memberAvatar} ${member.role === 'OWNER' ? styles.ownerAvatar : ''}`}>{initials}</span>
     <div className={styles.memberText}><strong>{person?.name || person?.username || person?.email || member.userUid}</strong><span>{person?.email || (member.status === 'INVITED' ? text.pending : '')}</span></div>
     <div className={styles.memberActions}><span className={`${styles.memberState} ${member.role === 'OWNER' ? styles.ownerState : member.status === 'INVITED' ? styles.pendingState : ''}`}>{member.role === 'OWNER' ? ownerLabel : member.status === 'INVITED' ? text.invited : text.member}{member.status === 'INVITED' && member.invitationEmailStatus === 'FAILED' ? ` · ${text.emailFailed}` : ''}</span>
+      {isOwner && member.status === 'INVITED' && <button type="button" className={styles.resendButton} disabled={busy} onClick={onResend}>{resending ? text.resendingEmail : text.resendEmail}</button>}
       {isOwner && member.role !== 'OWNER' && member.status === 'ACTIVE' && <button type="button" className={styles.removeButton} disabled={busy} onClick={onRemove}>{text.remove}</button>}
     </div>
   </li>;
