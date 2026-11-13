@@ -106,7 +106,7 @@ export function StudentVersionArchiveView() {
   return (
     <StudentShell title={t('nav.versions')} showStandardHeader={false}>
       {/* 1. Filter & Search Toolbar */}
-      <div className="student-filter-toolbar">
+      <div className="student-filter-toolbar" style={{ marginBottom: 16 }}>
         {/* Left: Dropdown select manuscript */}
         <div className="student-sort-box" style={{ gap: '8px' }}>
           <span className="student-sort-label" style={{ fontWeight: 600, color: '#475569' }}>

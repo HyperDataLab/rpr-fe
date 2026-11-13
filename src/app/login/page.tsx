@@ -10,10 +10,29 @@ import '@/styles/auth-forms.css';
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get('next') || '/student/my-preprints';
+  const requestedNextPath = searchParams.get('next');
+  const nextPath = requestedNextPath?.startsWith('/') && !requestedNextPath.startsWith('//') && !requestedNextPath.includes('\\') ? requestedNextPath : null;
   const ssoRequestId = searchParams.get('sso_request') || undefined;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handlePasswordLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+    const data = await authApi.loginWithUsername(username, password);
+    if (!data.success || !data.user) {
+      setError(data.error || 'Username or password is incorrect.');
+      setLoading(false);
+      return;
+    }
+    if (nextPath) window.location.href = nextPath;
+    else if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
+    else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
+    else window.location.href = '/student/my-preprints';
+  };
 
   const handleWorkspaceLogin = async () => {
     setError(null);
@@ -26,9 +45,10 @@ function LoginForm() {
         return;
       }
       if (data.ssoRedirectUrl) window.location.assign(data.ssoRedirectUrl);
+      else if (nextPath) window.location.href = nextPath;
       else if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
       else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
-      else window.location.href = nextPath;
+      else window.location.href = '/student/my-preprints';
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Google Workspace sign-in failed.');
       setLoading(false);
@@ -56,6 +76,26 @@ function LoginForm() {
           <div>{error}</div>
         </div>
       )}
+
+      {!ssoRequestId && <>
+      <form onSubmit={(event) => void handlePasswordLogin(event)} style={{ display: 'grid', gap: 12, marginBottom: 22 }}>
+        <label style={{ display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 650 }}>
+          Username
+          <input name="username" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} className="auth-input" placeholder="your.username" disabled={loading} />
+        </label>
+        <label style={{ display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 650 }}>
+          Password
+          <input name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="auth-input" placeholder="Enter your password" disabled={loading} />
+        </label>
+        <button type="submit" disabled={loading} aria-busy={loading} style={{ width: '100%', padding: '12px 16px', border: 0, borderRadius: 8, background: '#0071bc', color: '#fff', fontSize: 14, fontWeight: 700, cursor: loading ? 'wait' : 'pointer' }}>
+          {loading ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 18px', color: '#94a3b8', fontSize: 12 }}>
+        <span style={{ height: 1, background: '#e2e8f0', flex: 1 }} />OR<span style={{ height: 1, background: '#e2e8f0', flex: 1 }} />
+      </div>
+      </>}
 
       <button
         type="button"

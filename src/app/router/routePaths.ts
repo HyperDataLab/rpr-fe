@@ -8,6 +8,7 @@ export const ROUTES = {
   AUTH: {
     LOGIN: '/login',
   },
+  PROJECTS: '/projects',
   ADMIN: {
     ROOT: '/admin',
     DASHBOARD: '/admin/submissions',

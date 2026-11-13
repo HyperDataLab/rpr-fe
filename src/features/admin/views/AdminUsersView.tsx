@@ -60,6 +60,10 @@ export function AdminUsersView() {
 
   // Create User Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isNormalCreateOpen, setIsNormalCreateOpen] = useState(false);
+  const [normalForm, setNormalForm] = useState({ username: '', email: '', name: '', studentId: '', major: '', role: 'STUDENT' as AdminUser['role'], passwordMode: 'GENERATE' as 'GENERATE' | 'CUSTOM', password: '' });
+  const [normalCreateError, setNormalCreateError] = useState<string | null>(null);
+  const normalModalRef = useRef<HTMLDivElement>(null);
   const [createForm, setCreateForm] = useState({
     name: '',
     email: '',
@@ -72,7 +76,7 @@ export function AdminUsersView() {
   const createModalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isCreateOpen) return;
+    if (!isCreateOpen && !isNormalCreateOpen) return;
 
     const body = document.body;
     const root = document.documentElement;
@@ -94,15 +98,16 @@ export function AdminUsersView() {
     body.style.width = '100%';
     root.style.overflow = 'hidden';
 
-    const modal = createModalRef.current;
+    const modal = () => isNormalCreateOpen ? normalModalRef.current : createModalRef.current;
     const handleModalWheel = (event: WheelEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!modal) return;
+      const activeModal = modal();
+      if (!activeModal) return;
       const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
         ? 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? modal.clientHeight : 1;
-      modal.scrollTop += event.deltaY * multiplier;
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? activeModal.clientHeight : 1;
+      activeModal.scrollTop += event.deltaY * multiplier;
     };
     window.addEventListener('wheel', handleModalWheel, { capture: true, passive: false });
 
@@ -117,7 +122,7 @@ export function AdminUsersView() {
       root.style.overflow = rootOverflow;
       window.scrollTo(0, scrollY);
     };
-  }, [isCreateOpen]);
+  }, [isCreateOpen, isNormalCreateOpen]);
 
   // Custom Confirm Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -405,6 +410,32 @@ export function AdminUsersView() {
     }
   };
 
+  const handleNormalCreateSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusyId('create-normal');
+    setMessage(null);
+    setNormalCreateError(null);
+    try {
+      const created = await adminApi.createUser({
+        username: normalForm.username.trim(), email: normalForm.email.trim(), name: normalForm.name.trim(),
+        studentId: normalForm.studentId.trim() || null, major: normalForm.major.trim() || null,
+        role: normalForm.role, passwordMode: normalForm.passwordMode,
+        ...(normalForm.passwordMode === 'CUSTOM' ? { password: normalForm.password } : {}),
+      });
+      setIsNormalCreateOpen(false);
+      setNormalForm({ username: '', email: '', name: '', studentId: '', major: '', role: 'STUDENT', passwordMode: 'GENERATE', password: '' });
+      refreshAccounts(1);
+      refreshOverview();
+      setMessage(created.onboardingEmailSent
+        ? (locale === 'vi' ? `Đã tạo tài khoản và gửi thông tin đăng nhập đến ${created.email}.` : `Account created; sign-in details sent to ${created.email}.`)
+        : (locale === 'vi' ? 'Đã tạo tài khoản nhưng gửi email thất bại. Dùng “Gửi lại thông tin” trong danh sách tài khoản.' : 'Account created, but email delivery failed. Use “Resend credentials” in the account list.'));
+    } catch (reason) {
+      setNormalCreateError(reason instanceof Error ? reason.message : 'Unable to create account.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const renderRoleBadge = (role: AdminUser['role']) => {
     switch (role) {
       case 'STUDENT':
@@ -686,7 +717,7 @@ export function AdminUsersView() {
           </button>
         </div>
 
-        <div className="student-search-sort-group">
+        <div className="student-search-sort-group" style={{ width: '100%' }}>
           {/* Search Box */}
           <div className="student-search-box">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -730,10 +761,14 @@ export function AdminUsersView() {
             />
           </div>
 
-          {/* Add User button */}
-          <Button variant="primary" onClick={() => { setCreateError(null); setIsCreateOpen(true); }}>
-            {locale === 'vi' ? '+ Thêm tài khoản' : '+ Add Account'}
-          </Button>
+          <div style={{ marginLeft: 'auto', display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
+            <Button variant="primary" onClick={() => { setNormalCreateError(null); setIsNormalCreateOpen(true); }}>
+              {locale === 'vi' ? '+ Tạo tài khoản thường' : '+ Create normal account'}
+            </Button>
+            <Button variant="secondary" onClick={() => { setCreateError(null); setIsCreateOpen(true); }}>
+              {locale === 'vi' ? '+ Thêm tài khoản' : '+ Add Account'}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -774,6 +809,7 @@ export function AdminUsersView() {
                               </span>
                             )}
                           </div>
+                          {user.username && <span style={{ display: 'block', marginTop: 3, fontSize: 11.5, color: '#475569' }}>Username: {user.username}</span>}
                           {user.workspaceEmail && <span style={{ display: 'block', marginTop: 3, fontSize: 11.5, color: '#0369a1' }}>Workspace SSO: {user.workspaceEmail}</span>}
                         </div>
                       </div>
@@ -816,6 +852,21 @@ export function AdminUsersView() {
                     </td>
                     <td className="admin-user-col-actions" style={{ whiteSpace: 'nowrap' }}>
                       <div className="review-actions" style={{ justifyContent: 'flex-end', gap: '6px', flexWrap: 'nowrap' }}>
+                        {user.username && user.credentialEmailStatus === 'FAILED' && <Button
+                          variant="secondary"
+                          disabled={busyId === user.id}
+                          onClick={async () => {
+                            setBusyId(user.id);
+                            try {
+                              await adminApi.resendUserCredentials(user.id);
+                              refreshAccounts(page);
+                              setMessage(`Sign-in details sent to ${user.email}.`);
+                            } catch (reason) {
+                              setError(reason instanceof Error ? reason.message : 'Could not resend credentials.');
+                            } finally { setBusyId(null); }
+                          }}
+                          style={{ fontSize: 12, padding: '5px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}
+                        >{locale === 'vi' ? 'Gửi lại thông tin' : 'Resend credentials'}</Button>}
                         {user.workspaceEmail && <Button
                           variant="secondary"
                           disabled={busyId === user.id}
@@ -935,6 +986,76 @@ export function AdminUsersView() {
           </div>
         )}
       </div>
+
+      {isNormalCreateOpen && (
+        <div className="admin-modal-backdrop admin-profile-create-backdrop" onClick={() => !busyId && setIsNormalCreateOpen(false)}>
+          <div ref={normalModalRef} className="admin-modal-card admin-profile-create-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-normal-create-title">
+            <div className="admin-modal-header admin-profile-create-header">
+              <div className="admin-modal-icon admin-modal-icon--primary"><span style={{ fontSize: 20, fontWeight: 700 }}>@</span></div>
+              <div>
+                <h3 id="admin-normal-create-title" className="admin-modal-title">{locale === 'vi' ? 'Tạo tài khoản thường' : 'Create normal account'}</h3>
+                <p className="admin-modal-subtitle">{locale === 'vi' ? 'Tạo tài khoản HyperDataLab bằng username và mật khẩu.' : 'Create a HyperDataLab username and password account.'}</p>
+              </div>
+              <button type="button" className="admin-modal-close" onClick={() => !busyId && setIsNormalCreateOpen(false)} aria-label="Close" disabled={Boolean(busyId)}>×</button>
+            </div>
+            <form className="admin-profile-create-form" onSubmit={(event) => void handleNormalCreateSubmit(event)}>
+              <div className="admin-modal-body admin-profile-create-body">
+                <div className="admin-profile-create-note" role="note"><p>{locale === 'vi' ? 'Thông tin đăng nhập sẽ được gửi đến email liên hệ bên dưới.' : 'Sign-in details will be sent to the contact email below.'}</p></div>
+                <div className="admin-modal-field">
+                  <label className="admin-modal-label" htmlFor="admin-normal-username">{locale === 'vi' ? 'Tên đăng nhập' : 'Username'} *</label>
+                  <input id="admin-normal-username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" autoComplete="off" className="admin-modal-input" placeholder="e.g. duy.nguyen" value={normalForm.username} onChange={(event) => setNormalForm({ ...normalForm, username: event.target.value })} />
+                  <span className="admin-profile-create-hint">{locale === 'vi' ? 'Từ 3–32 ký tự: chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.' : '3–32 characters: letters, numbers, dot, underscore, or hyphen.'}</span>
+                </div>
+                <div className="admin-modal-field">
+                  <label className="admin-modal-label" htmlFor="admin-normal-email">{locale === 'vi' ? 'Email liên hệ' : 'Contact email'} *</label>
+                  <input id="admin-normal-email" type="email" required maxLength={254} autoComplete="email" className="admin-modal-input" placeholder="name@example.com" value={normalForm.email} onChange={(event) => setNormalForm({ ...normalForm, email: event.target.value })} />
+                </div>
+                <div className="admin-modal-field">
+                  <label className="admin-modal-label" htmlFor="admin-normal-name">{locale === 'vi' ? 'Họ và tên' : 'Full name'} *</label>
+                  <input id="admin-normal-name" required maxLength={160} autoComplete="name" className="admin-modal-input" value={normalForm.name} onChange={(event) => setNormalForm({ ...normalForm, name: event.target.value })} />
+                </div>
+                <div className="admin-profile-create-grid">
+                  <div className="admin-modal-field"><label className="admin-modal-label" id="admin-normal-role-label">{locale === 'vi' ? 'Vai trò' : 'Role'}</label>
+                    <div className="users-create-role-dropdown">
+                      <SortDropdown
+                        value={normalForm.role}
+                        onChange={(value) => setNormalForm({ ...normalForm, role: value as AdminUser['role'] })}
+                        options={[
+                          { value: 'STUDENT', label: locale === 'vi' ? 'Sinh viên' : 'Student' },
+                          { value: 'LECTURER', label: locale === 'vi' ? 'Giảng viên' : 'Lecturer' },
+                          { value: 'ADMIN', label: locale === 'vi' ? 'Quản trị viên' : 'Admin' },
+                        ]}
+                        disabled={Boolean(busyId)}
+                        style={{ width: '100%' }}
+                        ariaLabel={locale === 'vi' ? 'Chọn vai trò tài khoản' : 'Select account role'}
+                      />
+                    </div>
+                  </div>
+                  <div className="admin-modal-field"><label className="admin-modal-label" htmlFor="admin-normal-student-id">{locale === 'vi' ? 'Mã sinh viên' : 'Student ID'}</label>
+                    <input id="admin-normal-student-id" maxLength={50} className="admin-modal-input" value={normalForm.studentId} onChange={(event) => setNormalForm({ ...normalForm, studentId: event.target.value })} />
+                  </div>
+                </div>
+                <div className="admin-modal-field"><label className="admin-modal-label" htmlFor="admin-normal-major">{locale === 'vi' ? 'Ngành / Khoa' : 'Major / Department'}</label>
+                  <input id="admin-normal-major" maxLength={120} className="admin-modal-input" value={normalForm.major} onChange={(event) => setNormalForm({ ...normalForm, major: event.target.value })} />
+                </div>
+                <div className="admin-modal-field"><span className="admin-modal-label">{locale === 'vi' ? 'Mật khẩu ban đầu' : 'Initial password'}</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                    <label><input type="radio" name="normal-password-mode" checked={normalForm.passwordMode === 'GENERATE'} onChange={() => setNormalForm({ ...normalForm, passwordMode: 'GENERATE', password: '' })} /> {locale === 'vi' ? 'Tạo tự động' : 'Generate automatically'}</label>
+                    <label><input type="radio" name="normal-password-mode" checked={normalForm.passwordMode === 'CUSTOM'} onChange={() => setNormalForm({ ...normalForm, passwordMode: 'CUSTOM' })} /> {locale === 'vi' ? 'Nhập mật khẩu' : 'Enter password'}</label>
+                  </div>
+                  {normalForm.passwordMode === 'CUSTOM' && <input type="password" required minLength={8} maxLength={128} autoComplete="new-password" className="admin-modal-input" placeholder={locale === 'vi' ? 'Ít nhất 8 ký tự' : 'At least 8 characters'} value={normalForm.password} onChange={(event) => setNormalForm({ ...normalForm, password: event.target.value })} style={{ marginTop: 10 }} />}
+                  {normalForm.passwordMode === 'GENERATE' && <span className="admin-profile-create-hint">{locale === 'vi' ? 'Mật khẩu tự tạo chỉ được gửi qua email và không hiển thị tại đây.' : 'The generated password is emailed once and is not displayed here.'}</span>}
+                </div>
+                {normalCreateError && <div className="admin-profile-create-error" role="alert">{normalCreateError}</div>}
+              </div>
+              <div className="admin-modal-footer admin-profile-create-footer">
+                <button type="button" className="admin-btn-cancel" onClick={() => setIsNormalCreateOpen(false)} disabled={Boolean(busyId)}>{locale === 'vi' ? 'Hủy' : 'Cancel'}</button>
+                <button type="submit" className="admin-btn-confirm admin-btn-confirm--primary" disabled={Boolean(busyId)}>{busyId === 'create-normal' ? (locale === 'vi' ? 'Đang tạo tài khoản…' : 'Creating account…') : (locale === 'vi' ? 'Tạo tài khoản' : 'Create account')}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Create User Modal */}
       {isCreateOpen && (

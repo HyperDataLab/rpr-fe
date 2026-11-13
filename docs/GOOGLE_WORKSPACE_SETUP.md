@@ -58,6 +58,7 @@ The OAuth client ID, redirect URI, Workspace domain, admin allowlist, and key ve
 npx wrangler@4.160.1 secret put GOOGLE_CLIENT_SECRET --config worker/wrangler.toml
 npx wrangler@4.160.1 secret put TOKEN_ENCRYPTION_KEYS --config worker/wrangler.toml
 npx wrangler@4.160.1 secret put FIREBASE_SERVICE_ACCOUNT_JSON --config worker/wrangler.toml
+npx wrangler@4.160.1 secret put FIREBASE_WEB_API_KEY --config worker/wrangler.toml
 npx wrangler@4.160.1 secret put RESEND_API_KEY --config worker/wrangler.toml
 ```
 
@@ -110,3 +111,6 @@ Submit a test registration and confirm it creates only a `registrationRequests` 
 - Directory API 403: confirm Admin SDK API is enabled and the connected account has user-management privileges.
 - D1 binding error: replace the placeholder `database_id`, then deploy the binding and run migrations.
 - OAuth app testing/verification: add test users while in testing or complete Google's publishing/verification requirements for the intended audience.
+
+
+Normal username/password accounts also require the Firebase project's FIREBASE_WEB_API_KEY as a Worker secret. The Worker uses it to create accounts and verify passwords through Firebase Identity Toolkit; do not send it to users or include it in responses. Apply D1 migration 0008_app_user_logins.sql before deploying the Worker.

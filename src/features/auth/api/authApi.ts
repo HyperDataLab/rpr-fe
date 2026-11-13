@@ -51,6 +51,29 @@ export const authApi = {
     return currentUser ? loadUserProfile(currentUser.uid) : null;
   },
 
+  async loginWithUsername(username: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
+    const workerUrl = process.env.NEXT_PUBLIC_R2_WORKER_URL?.replace(/\/$/, '');
+    if (!workerUrl) return { success: false, error: 'Cloudflare Worker URL is not configured.' };
+    try {
+      const response = await fetch(`${workerUrl}/auth/username-login`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }), cache: 'no-store',
+      });
+      const result = await response.json().catch(() => null) as { data?: { customToken?: string }; error?: { message?: string } } | null;
+      if (!response.ok || !result?.data?.customToken) throw new Error(result?.error?.message || 'Username or password is incorrect.');
+      const credential = await signInWithCustomToken(firebaseAuth(), result.data.customToken);
+      const user = await loadUserProfile(credential.user.uid);
+      if (!user || !user.isActive || user.status !== 'APPROVED') {
+        await signOut(firebaseAuth());
+        return { success: false, error: 'This account is not active. Contact an administrator.' };
+      }
+      return { success: true, user };
+    } catch (error) {
+      await signOut(firebaseAuth()).catch(() => undefined);
+      return { success: false, error: error instanceof Error ? error.message : 'Username or password is incorrect.' };
+    }
+  },
+
   async login(identifier: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
     const email = identifier.trim().toLowerCase();
     if (!email.includes('@')) {

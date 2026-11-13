@@ -156,7 +156,7 @@ export function StudentMentorFeedbackView() {
   return (
     <StudentShell title={t('nav.mentorFeedback')} showStandardHeader={false}>
       {/* 1. Filter Toolbar */}
-      <div className="student-filter-toolbar">
+      <div className="student-filter-toolbar" style={{ marginBottom: 16 }}>
         {/* Status Tab Pills */}
         <div className="student-tabs-pills" role="tablist" aria-label={t('student.preprints.filterStatus')}>
           <button

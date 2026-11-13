@@ -512,6 +512,10 @@ export default {
         const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
         if (workspaceResponse) return withCors(workspaceResponse, request, env);
       }
+      if (url.pathname === '/auth/username-login' && request.method === 'POST') {
+        const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
+        if (workspaceResponse) return withCors(workspaceResponse, request, env);
+      }
       if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST') {
         const token = decodeFirestoreBearer(request);
         let claims: FirebaseClaims;
@@ -526,7 +530,7 @@ export default {
         }, token);
         if (workspaceResponse) return withCors(workspaceResponse, request, env);
       }
-      if (url.pathname.startsWith('/auth/google/') || url.pathname.startsWith('/auth/workspace/') || url.pathname.startsWith('/api/workspace/') || url.pathname.startsWith('/api/sso/')) {
+      if (url.pathname.startsWith('/auth/google/') || url.pathname.startsWith('/auth/workspace/') || url.pathname.startsWith('/api/workspace/') || url.pathname.startsWith('/api/sso/') || url.pathname.startsWith('/api/research-projects')) {
         if (url.pathname === '/auth/google/callback' && request.method === 'GET') {
           const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
           if (workspaceResponse) return withCors(workspaceResponse, request, env);
