@@ -557,6 +557,9 @@ async function createLinkedWorkspaceProfile(request: Request, env: WorkspaceEnv,
 
   const input = await parseJson(request);
   const workspaceEmail = validateEmail(input.email, env);
+  const personalEmail = typeof input.personalEmail === 'string' ? input.personalEmail.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(personalEmail)) jsonError(400, 'CONTACT_EMAIL_REQUIRED', 'Enter a valid personal email address for the access notice.');
+  if (personalEmail === workspaceEmail) jsonError(400, 'CONTACT_EMAIL_REQUIRED', 'The access-notice email must differ from the Workspace email.');
   const role = input.role;
   if (role !== 'ADMIN' && role !== 'LECTURER' && role !== 'STUDENT') jsonError(400, 'VALIDATION_ERROR', 'Choose a supported application role.');
   const name = typeof input.name === 'string' ? input.name.trim() : '';
@@ -602,8 +605,8 @@ async function createLinkedWorkspaceProfile(request: Request, env: WorkspaceEnv,
   try {
     await env.DB.prepare(`INSERT INTO workspace_identity_links
       (profile_uid, workspace_email, workspace_user_id, personal_email, status, onboarding_email_status, linked_by_uid, created_at, updated_at)
-      VALUES (?, ?, ?, '', 'PROVISIONING', 'PENDING', ?, ?, ?)`)
-      .bind(uid, workspaceEmail, String(directoryUser.id || workspaceEmail), identity.uid, now, now).run();
+      VALUES (?, ?, ?, ?, 'PROVISIONING', 'PENDING', ?, ?, ?)`)
+      .bind(uid, workspaceEmail, String(directoryUser.id || workspaceEmail), personalEmail, identity.uid, now, now).run();
   } catch (error) {
     if (String(error).toLowerCase().includes('unique')) {
       jsonError(409, 'WORKSPACE_EMAIL_ALREADY_LINKED', 'This Workspace email is already linked to another application profile.');
@@ -644,8 +647,22 @@ async function createLinkedWorkspaceProfile(request: Request, env: WorkspaceEnv,
   }
 
   await audit(env, identity.uid, 'WORKSPACE_PROFILE_CREATED', 'SUCCESS', String(directoryUser.id || workspaceEmail), workspaceEmail);
-  return response({ id: uid, email: workspaceEmail, workspaceEmail, name: profileName, role, status: 'APPROVED', isActive: true },
-    'Application profile created and linked to the existing Workspace account.', 201);
+  let emailSent = true;
+  try {
+    const stagedCredential = await stagedTemporaryPassword(env, workspaceEmail);
+    await sendWorkspaceOnboarding(env, personalEmail, profileName || 'ResearchPulse user', workspaceEmail, stagedCredential?.password);
+    if (stagedCredential) await discardStagedTemporaryPassword(env, workspaceEmail);
+    await env.DB.prepare("UPDATE workspace_identity_links SET onboarding_email_status = 'SENT', updated_at = ? WHERE profile_uid = ?")
+      .bind(new Date().toISOString(), uid).run();
+  } catch (error) {
+    emailSent = false;
+    await env.DB.prepare("UPDATE workspace_identity_links SET onboarding_email_status = 'FAILED', updated_at = ? WHERE profile_uid = ?")
+      .bind(new Date().toISOString(), uid).run();
+    await audit(env, identity.uid, 'WORKSPACE_PROFILE_ONBOARDING_EMAIL_FAILED', 'FAILED', workspaceEmail);
+    if (!(error instanceof ApiError)) console.error('Workspace profile onboarding email failed', error instanceof Error ? error.message : 'unknown');
+  }
+  return response({ id: uid, email: workspaceEmail, workspaceEmail, personalEmail, onboardingEmailSent: emailSent, name: profileName, role, status: 'APPROVED', isActive: true },
+    emailSent ? 'Application profile created, linked, and sign-in details emailed.' : 'Application profile created and linked, but the access email could not be delivered. Use Resend access to retry.', 201);
 }
 
 function htmlEscape(value: string) {
