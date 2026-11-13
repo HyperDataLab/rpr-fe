@@ -42,7 +42,7 @@ Errors use:
 | PATCH | `/api/workspace/users/:id/restore` | `workspace.suspend` | Restore account. |
 | DELETE | `/api/workspace/users/:id` | `workspace.delete` | Disabled by default. Requires `WORKSPACE_DELETE_ENABLED=true` and JSON `{ "confirmEmail": "exact-user@domain" }`. Protected allowlisted and connected administrator accounts cannot be deleted. |
 | DELETE | `/api/workspace/app-users/:uid` | `appUser.delete` (active app administrator) | Permanently removes the Firebase Auth user and application profile/registration/notifications/reviews/events and related Firestore records. Removes the D1 app-to-Workspace identity link so the mailbox can be linked again. Requires `{ "confirmEmail": "exact-profile-email" }`. It never calls Google Directory, preserves the Workspace mailbox, and preserves R2 PDF files. |
-| POST | `/api/workspace/profiles` | `workspace.create` | Creates an approved application profile for an existing, active primary Workspace mailbox. Rejects an email already assigned to any existing profile and relies on a unique D1 Workspace-email link to prevent concurrent or repeat linking. Does not create a mailbox, Firebase password, or Workspace password. |
+| POST | `/api/workspace/profiles` | `workspace.create` | Creates an approved profile for an existing, active primary Workspace mailbox and requires `personalEmail` as the access-notice recipient. Rejects duplicate profile/mailbox links, then emails SSO instructions and includes a still-pending temporary password once when the mailbox was created by this Worker. It never creates a mailbox or changes a password. Returns `onboardingEmailSent`; use the linked profile's resend endpoint if delivery fails. |
 | POST | `/api/workspace/registrations/:profileUid/approve` | `workspace.create` | Verifies an existing, active primary Workspace mailbox, then links it to the approved application profile using the registration UID and details. It never creates a mailbox or changes its password. If the mailbox is missing, returns `409 WORKSPACE_ACCOUNT_REQUIRED` and leaves the registration pending. Legacy pending profiles are updated in place. Sends sign-in instructions and, once only, a still-pending temporary password for mailboxes provisioned by this Worker. |
 | POST | `/api/workspace/registrations/:profileUid/resend` | `workspace.update` | Sends Workspace SSO instructions to the saved personal contact. Includes the encrypted temporary password once if the mailbox was created through this Worker and the credential is still pending; never changes a password. |
 
@@ -63,6 +63,14 @@ Registration approval request body:
 ```json
 {"userId":"existing-firebase-profile-uid","workspaceEmail":"student@hyperdatalab.org","firstName":"Nguyen","lastName":"Van A","studentId":"SE123456","major":"Computer Science"}
 ```
+
+Admin profile creation request body:
+
+```json
+{"email":"student@hyperdatalab.org","personalEmail":"student@example.com","name":"Nguyen Van A","role":"STUDENT","studentId":"SE123456","major":"Software Engineering"}
+```
+
+The Worker saves `personalEmail` on the identity link for future access resends. If the email service is unavailable, the profile is still created and the response reports `onboardingEmailSent: false`; the staged temporary password remains encrypted until delivery succeeds or it expires.
 
 The Worker verifies the Directory user with a read-only lookup, then links the existing primary mailbox to the application profile using the registration UID. It never calls the Directory create-user or password-update operation in the approval flow. Existing legacy pending profiles retain their UID and role. If no mailbox exists, create it explicitly in Admin → Account Management → Google Workspace, then retry approval. If notice delivery fails after linking, retry through `/resend`; the encrypted temporary password is included if still pending, otherwise the action sends SSO instructions only.
 

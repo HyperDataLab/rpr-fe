@@ -4531,7 +4531,11 @@
   display: flex;
   flex-direction: column;
   width: min(100%, 610px);
+  height: min(90vh, 780px);
+  height: min(90dvh, 780px);
   max-height: min(90dvh, 780px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2);
@@ -4561,8 +4565,41 @@
   display: flex;
   flex-direction: column;
   gap: 17px;
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px 24px 22px;
+}
+
+.admin-profile-create-modal,
+.admin-profile-create-body {
+  scrollbar-color: #94a3b8 transparent;
+  scrollbar-width: thin;
+}
+
+.admin-profile-create-modal::-webkit-scrollbar,
+.admin-profile-create-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-profile-create-modal::-webkit-scrollbar-track,
+.admin-profile-create-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-profile-create-modal::-webkit-scrollbar-thumb,
+.admin-profile-create-body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #cbd5e1;
+  background-clip: content-box;
+}
+
+.admin-profile-create-modal::-webkit-scrollbar-thumb:hover,
+.admin-profile-create-body::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: content-box;
 }
 
 .admin-profile-create-note {
@@ -4659,6 +4696,8 @@
   }
 
   .admin-profile-create-modal {
+    height: min(92vh, 780px);
+    height: min(92dvh, 780px);
     max-height: min(92dvh, 780px);
     border-radius: 14px;
   }

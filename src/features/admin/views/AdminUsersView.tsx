@@ -63,11 +63,61 @@ export function AdminUsersView() {
   const [createForm, setCreateForm] = useState({
     name: '',
     email: '',
+    personalEmail: '',
     studentId: '',
     major: '',
     role: 'STUDENT' as AdminUser['role'],
   });
   const [createError, setCreateError] = useState<string | null>(null);
+  const createModalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isCreateOpen) return;
+
+    const body = document.body;
+    const root = document.documentElement;
+    const scrollY = window.scrollY;
+    const bodyStyles = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+    };
+    const rootOverflow = root.style.overflow;
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    root.style.overflow = 'hidden';
+
+    const modal = createModalRef.current;
+    const handleModalWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!modal) return;
+      const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? modal.clientHeight : 1;
+      modal.scrollTop += event.deltaY * multiplier;
+    };
+    window.addEventListener('wheel', handleModalWheel, { capture: true, passive: false });
+
+    return () => {
+      window.removeEventListener('wheel', handleModalWheel, true);
+      body.style.overflow = bodyStyles.overflow;
+      body.style.position = bodyStyles.position;
+      body.style.top = bodyStyles.top;
+      body.style.left = bodyStyles.left;
+      body.style.right = bodyStyles.right;
+      body.style.width = bodyStyles.width;
+      root.style.overflow = rootOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isCreateOpen]);
 
   // Custom Confirm Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -321,19 +371,22 @@ export function AdminUsersView() {
     setMessage(null);
     setCreateError(null);
     try {
-      await createWorkspaceProfile({
+      const createdProfile = await createWorkspaceProfile({
         email: createForm.email.trim(),
+        personalEmail: createForm.personalEmail.trim(),
         name: createForm.name.trim() || undefined,
         studentId: createForm.studentId.trim() || undefined,
         major: createForm.major.trim() || undefined,
         role: createForm.role || 'STUDENT',
       });
       setIsCreateOpen(false);
-      setCreateForm({ name: '', email: '', studentId: '', major: '', role: 'STUDENT' });
+      setCreateForm({ name: '', email: '', personalEmail: '', studentId: '', major: '', role: 'STUDENT' });
       refreshAccounts(1);
       refreshOverview();
       void refreshWorkspace(1, [undefined], workspaceSearch);
-      setMessage(locale === 'vi' ? `Đã tạo tài khoản mới thành công.` : `Successfully created new account.`);
+      setMessage(createdProfile.onboardingEmailSent
+        ? (locale === 'vi' ? `Đã tạo hồ sơ và gửi thông tin đăng nhập đến ${createdProfile.personalEmail}.` : `Profile created; sign-in details sent to ${createdProfile.personalEmail}.`)
+        : (locale === 'vi' ? 'Đã tạo hồ sơ nhưng gửi email thất bại. Dùng Resend access để gửi lại.' : 'Profile created, but the email could not be sent. Use Resend access to retry.'));
     } catch (reason: unknown) {
       const errorMessage = reason instanceof Error ? reason.message : 'Unable to create profile.';
       const viErrors: Record<string, string> = {
@@ -343,6 +396,8 @@ export function AdminUsersView() {
         'Restore this Workspace account before linking it to a profile.': 'Hãy khôi phục tài khoản Workspace trước khi liên kết hồ sơ.',
         'Use the Workspace account’s primary email address, not an alias.': 'Hãy nhập email chính của tài khoản Workspace, không dùng email bí danh.',
         'The email must use the configured Workspace domain.': 'Email phải thuộc domain Workspace đã cấu hình.',
+        'Enter a valid personal email address for the access notice.': 'Vui lòng nhập email cá nhân hợp lệ để nhận thông tin đăng nhập.',
+        'The access-notice email must differ from the Workspace email.': 'Email nhận thông tin phải khác email Workspace.',
       };
       setCreateError(locale === 'vi' ? viErrors[errorMessage] || errorMessage : errorMessage);
     } finally {
@@ -884,7 +939,7 @@ export function AdminUsersView() {
       {/* Create User Modal */}
       {isCreateOpen && (
         <div className="admin-modal-backdrop admin-profile-create-backdrop" onClick={() => !busyId && setIsCreateOpen(false)}>
-          <div className="admin-modal-card admin-profile-create-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-profile-create-title" aria-describedby="admin-profile-create-description">
+          <div ref={createModalRef} className="admin-modal-card admin-profile-create-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-profile-create-title" aria-describedby="admin-profile-create-description">
             <div className="admin-modal-header admin-profile-create-header">
               <div className="admin-modal-icon admin-modal-icon--primary">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -945,6 +1000,27 @@ export function AdminUsersView() {
                     {locale === 'vi'
                       ? `Dùng email chính thuộc ${workspaceStatus?.domain || 'Workspace'}, đang hoạt động và chưa được gán cho hồ sơ khác.`
                       : `Use an active primary email in ${workspaceStatus?.domain || 'your Workspace'} that is not linked to another profile.`}
+                  </span>
+                </div>
+
+                <div className="admin-modal-field">
+                  <label className="admin-modal-label" htmlFor="admin-profile-personal-email">
+                    {locale === 'vi' ? 'Email nhận thông tin đăng nhập' : 'Email for sign-in details'} <span aria-hidden="true" style={{ color: '#dc2626' }}>*</span>
+                  </label>
+                  <input
+                    id="admin-profile-personal-email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    placeholder="name@example.com"
+                    value={createForm.personalEmail}
+                    onChange={(e) => { setCreateForm({ ...createForm, personalEmail: e.target.value }); setCreateError(null); }}
+                    className="admin-modal-input"
+                  />
+                  <span className="admin-profile-create-hint">
+                    {locale === 'vi'
+                      ? 'Thông tin tài khoản Workspace và mật khẩu tạm thời (nếu vừa được tạo) sẽ gửi đến email này.'
+                      : 'Workspace account details and its temporary password, if newly created, will be sent here.'}
                   </span>
                 </div>
 

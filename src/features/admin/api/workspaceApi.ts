@@ -76,10 +76,13 @@ export interface WorkspaceProfile {
   role: 'ADMIN' | 'LECTURER' | 'STUDENT';
   status: 'APPROVED';
   isActive: true;
+  personalEmail: string;
+  onboardingEmailSent: boolean;
 }
 
 export async function createWorkspaceProfile(payload: {
   email: string;
+  personalEmail: string;
   name?: string;
   role: WorkspaceProfile['role'];
   studentId?: string;
