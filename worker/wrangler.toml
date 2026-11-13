@@ -21,7 +21,7 @@ RESEND_FROM_EMAIL = "HyperDataLab <accounts@hyperdatalab.org>"
 # npx wrangler@4.160.1 secret put GOOGLE_CLIENT_SECRET --config worker/wrangler.toml
 # npx wrangler@4.160.1 secret put TOKEN_ENCRYPTION_KEYS --config worker/wrangler.toml
 # TOKEN_ENCRYPTION_KEYS value format: {"v1":"<base64-encoded-32-byte-key>"}
-# Needed only by the existing account-invitation route:
+# Needed by Firebase email/password account creation, username login, and the existing account-invitation route:
 # npx wrangler@4.160.1 secret put FIREBASE_WEB_API_KEY --config worker/wrangler.toml
 # Needed to sign Firebase custom tokens that preserve existing profile UIDs:
 # npx wrangler@4.160.1 secret put FIREBASE_SERVICE_ACCOUNT_JSON --config worker/wrangler.toml

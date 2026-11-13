@@ -9,6 +9,8 @@
 ## Credential handling
 
 - Refresh tokens and transient PKCE verifiers are AES-256-GCM encrypted with per-value random 96-bit nonces and context-bound additional authenticated data.
+- Normal-account usernames are normalized and stored in D1, never exposed through a username lookup API. Username/password login is rate limited using a hash of the client IP and normalized username; Firebase verifies the password, and the Worker checks the matching profile is approved and active before returning a custom token. Invalid usernames and passwords share the same response.
+- Generated or admin-entered initial passwords are staged only as AES-256-GCM ciphertext in D1 until Resend accepts delivery, with a seven-day expiry. Passwords and Firebase ID/refresh tokens are not returned to the browser or written to logs. The contact email is the Firebase Auth email and the credential recipient.
 - Encryption keys live in Cloudflare secrets. D1 stores ciphertext, nonce, and key version. Keep old key versions available while rows use them; rotate by adding a new key version, re-encrypting rows, verifying, then removing the old version.
 - OAuth state is SHA-256 hashed in D1, expires after ten minutes, binds to the initiating Firebase UID, and is atomically consumed once. PKCE uses S256 and the ID token nonce is checked.
 - OAuth code, passwords, access tokens, and refresh tokens are never written to audit logs. Audit target detail is limited to necessary account identifiers.
@@ -21,6 +23,7 @@
 - Workspace domain restrictions apply to create/update/delete targets. The configured Google administrator allowlist also protects administrator accounts from deletion.
 - Google Workspace mailbox deletion is disabled unless `WORKSPACE_DELETE_ENABLED=true`, requires an exact-email confirmation, and is never automatically retried.
 - Application-account deletion is a separate admin-only route. It requires exact-email confirmation, blocks self-deletion and deletion of the last active administrator, revokes Firebase Auth, removes the D1 app-to-Workspace identity link, and does not invoke Google Directory or alter the Workspace mailbox. It preserves all R2 PDF files; shared Firestore records remain available to other authors while the deleted user's links and activity are removed.
+- Normal-account creation is a separate admin-only route and does not change Workspace-linked accounts or registration approval. Apply D1 migration `0008_app_user_logins.sql` before deploying the new routes; it holds the private username mapping and temporary encrypted credential only while email delivery is pending.
 - Admin APIs are rate limited. CORS uses exact configured origins. Callback redirect is fixed to the trusted configured frontend origin.
 
 ## Operational controls

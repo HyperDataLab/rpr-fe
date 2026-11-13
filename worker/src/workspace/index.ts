@@ -437,6 +437,170 @@ async function discardStagedTemporaryPassword(env: WorkspaceEnv, workspaceEmail:
   await env.DB.prepare('DELETE FROM workspace_temp_credentials WHERE workspace_email = ?').bind(workspaceEmail).run();
 }
 
+function normalizeUsername(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function appUserPassword() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*';
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+}
+
+async function firebasePasswordRequest(env: WorkspaceEnv, body: Record<string, unknown>, endpoint: 'signUp' | 'signInWithPassword') {
+  if (!env.FIREBASE_WEB_API_KEY) jsonError(503, 'FIREBASE_AUTH_NOT_CONFIGURED', 'Firebase password sign-in is not configured on the Worker.');
+  const result = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${endpoint}?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
+    method: 'POST', signal: AbortSignal.timeout(10000),
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const payload = await result.json().catch(() => null) as { localId?: string; error?: { message?: string } } | null;
+  return { result, payload };
+}
+
+async function sendAppUserCredentials(env: WorkspaceEnv, to: string, name: string, username: string, password: string) {
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) throw new Error('Credential email delivery is not configured.');
+  const safe = (value: string) => htmlEscape(value);
+  const loginUrl = frontendLoginUrl(env);
+  const loginText = loginUrl ? `\nSign in: ${loginUrl}` : '';
+  const text = `Hello ${name || 'there'},\n\nYour HyperDataLab account is ready.\nUsername: ${username}\nTemporary password: ${password}\n\nSign in with username and password.${loginText}\nPlease change your password after signing in.`;
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172033"><h2>Your HyperDataLab account is ready</h2><p>Hello ${safe(name || 'there')},</p><p>Sign in with these details:</p><p><b>Username:</b> ${safe(username)}<br><b>Temporary password:</b> <code>${safe(password)}</code></p>${loginUrl ? `<p><a href="${safe(loginUrl)}">Open HyperDataLab</a></p>` : ''}<p>Please change your password after signing in.</p></body></html>`;
+  const result = await fetch('https://api.resend.com/emails', {
+    method: 'POST', signal: AbortSignal.timeout(12000),
+    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject: 'HyperDataLab | Your sign-in details', text, html }),
+  });
+  if (!result.ok) throw new Error('Credential email delivery failed.');
+}
+
+async function createApplicationUser(request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.create', env);
+  await rateLimit(env, identity.uid, 'app-user-create', 15, 600);
+  const input = await parseJson(request);
+  const username = normalizeUsername(input.username);
+  if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) jsonError(400, 'INVALID_USERNAME', 'Username must be 3 to 32 characters and use letters, numbers, dots, underscores, or hyphens.');
+  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) jsonError(400, 'INVALID_EMAIL', 'Enter a valid contact email.');
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  if (!name || name.length > 160) jsonError(400, 'VALIDATION_ERROR', 'Name is required and must be at most 160 characters.');
+  const role = input.role;
+  if (role !== 'ADMIN' && role !== 'LECTURER' && role !== 'STUDENT') jsonError(400, 'VALIDATION_ERROR', 'Choose a supported application role.');
+  const studentId = typeof input.studentId === 'string' ? input.studentId.trim() : '';
+  const major = typeof input.major === 'string' ? input.major.trim() : '';
+  if (studentId.length > 50 || major.length > 120) jsonError(400, 'VALIDATION_ERROR', 'Student ID or major exceeds the allowed length.');
+  const passwordMode = input.passwordMode === 'CUSTOM' ? 'CUSTOM' : 'GENERATE';
+  const password = passwordMode === 'CUSTOM' ? (typeof input.password === 'string' ? input.password : '') : appUserPassword();
+  if (password.length < 8 || password.length > 128) jsonError(400, 'INVALID_PASSWORD', 'Password must be between 8 and 128 characters.');
+  const now = new Date().toISOString();
+  let uid = crypto.randomUUID();
+  const reservationUid = uid;
+  const expiry = new Date(Date.now() + 7 * 86400000).toISOString();
+  try {
+    await env.DB.prepare(`INSERT INTO app_user_logins (profile_uid, username, email, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'PROVISIONING', ?, ?)`).bind(uid, username, email, now, now).run();
+  } catch (error) {
+    const storageError = error instanceof Error ? error.message : String(error);
+    if (/unique constraint failed/i.test(storageError)) {
+      jsonError(409, 'USERNAME_OR_EMAIL_ALREADY_EXISTS', 'Username or email is already assigned to an account.');
+    }
+    console.error('App user login reservation failed', storageError);
+    jsonError(503, 'APP_USER_LOGIN_STORAGE_UNAVAILABLE', 'Account storage is not ready. Apply the latest Worker D1 migrations, then retry.');
+  }
+  let authCreated = false;
+  let profileCreated = false;
+  let credentialStaged = false;
+  let accessToken = '';
+  try {
+    accessToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/identitytoolkit');
+    const created = await firebasePasswordRequest(env, { email, password, returnSecureToken: true }, 'signUp');
+    if (!created.result.ok || !created.payload?.localId) {
+      const duplicate = created.payload?.error?.message?.includes('EMAIL_EXISTS');
+      jsonError(duplicate ? 409 : 502, duplicate ? 'EMAIL_ALREADY_EXISTS' : 'FIREBASE_AUTH_CREATE_FAILED', duplicate ? 'This email is already assigned to a Firebase account.' : 'Could not create the Firebase account.');
+    }
+    authCreated = true;
+    uid = created.payload.localId;
+    const reserved = await env.DB.prepare("UPDATE app_user_logins SET profile_uid = ?, updated_at = ? WHERE profile_uid = ? AND status = 'PROVISIONING'")
+      .bind(uid, new Date().toISOString(), reservationUid).run();
+    if (reserved.meta?.changes !== 1) throw new Error('Could not link the reserved username to the Firebase account.');
+    const cipher = await encryptSecret(env, password, `app-user-password:${uid}`);
+    await createWorkspaceProfileDocument(env, accessToken, uid, {
+      email, username, name, ...(studentId ? { studentId } : {}), ...(major ? { major } : {}), role,
+      status: 'APPROVED', isActive: true, loginProvider: 'password',
+      credentialEmailStatus: 'PENDING', createdAt: { timestampValue: now }, updatedAt: { timestampValue: now },
+    });
+    profileCreated = true;
+    await env.DB.prepare(`INSERT INTO app_user_pending_credentials (profile_uid, ciphertext, nonce, key_version, email, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(uid, cipher.ciphertext, cipher.nonce, cipher.keyVersion, email, expiry, now).run();
+    credentialStaged = true;
+    const linked = await env.DB.prepare("UPDATE app_user_logins SET status = 'LINKED', updated_at = ? WHERE profile_uid = ? AND status = 'PROVISIONING'").bind(new Date().toISOString(), uid).run();
+    if (linked.meta?.changes !== 1) throw new Error('Could not activate the username mapping.');
+  } catch (error) {
+    if (profileCreated && accessToken) await deleteWorkspaceProfileDocument(env, accessToken, uid).catch(() => undefined);
+    if (authCreated && accessToken) await deleteFirebaseAuthUser(env, accessToken, uid).catch(() => undefined);
+    if (credentialStaged) await env.DB.prepare('DELETE FROM app_user_pending_credentials WHERE profile_uid = ?').bind(uid).run();
+    await env.DB.prepare('DELETE FROM app_user_logins WHERE profile_uid = ?').bind(uid).run();
+    await env.DB.prepare('DELETE FROM app_user_logins WHERE profile_uid = ?').bind(reservationUid).run();
+    if (error instanceof ApiError) throw error;
+    throw error;
+  }
+  let onboardingEmailSent = false;
+  try {
+    await sendAppUserCredentials(env, email, name, username, password);
+    onboardingEmailSent = true;
+    await env.DB.prepare('DELETE FROM app_user_pending_credentials WHERE profile_uid = ?').bind(uid).run();
+    await patchRegistrationProfile(env, accessToken, uid, { credentialEmailStatus: 'SENT', updatedAt: { timestampValue: new Date().toISOString() } });
+  } catch (error) {
+    await patchRegistrationProfile(env, accessToken, uid, { credentialEmailStatus: 'FAILED', updatedAt: { timestampValue: new Date().toISOString() } }).catch(() => undefined);
+    console.error('Application account credential email failed', error instanceof Error ? error.message : 'unknown');
+  }
+  await audit(env, identity.uid, 'APP_USER_CREATED', 'SUCCESS', uid, `username:${username};email-sent:${onboardingEmailSent}`);
+  return response({ id: uid, email, username, name, role, status: 'APPROVED', isActive: true, createdAt: now, updatedAt: now, onboardingEmailSent }, onboardingEmailSent ? 'Account created and sign-in details emailed.' : 'Account created, but credential email delivery failed. Retry from Admin users.', 201);
+}
+
+async function resendAppUserCredentials(uid: string, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.create', env);
+  await rateLimit(env, identity.uid, 'app-user-credential-resend', 10, 600);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) jsonError(400, 'VALIDATION_ERROR', 'Invalid application user identifier.');
+  const row = await env.DB.prepare(`SELECT c.ciphertext, c.nonce, c.key_version, c.email, c.expires_at, l.username
+    FROM app_user_pending_credentials c JOIN app_user_logins l ON l.profile_uid = c.profile_uid
+    WHERE c.profile_uid = ? AND l.status = 'LINKED'`).bind(uid).first<{ ciphertext: string; nonce: string; key_version: string; email: string; expires_at: string; username: string }>();
+  if (!row || row.expires_at <= new Date().toISOString()) {
+    if (row) await env.DB.prepare('DELETE FROM app_user_pending_credentials WHERE profile_uid = ?').bind(uid).run();
+    jsonError(410, 'CREDENTIAL_RETRY_EXPIRED', 'Credential retry has expired. Reset the account password before resending.');
+  }
+  const serviceToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const profileResult = await fetch(`${firestoreBase(env)}/userProfiles/${encodeURIComponent(uid)}`, { headers: { authorization: `Bearer ${serviceToken}` } });
+  if (!profileResult.ok) jsonError(404, 'APP_USER_NOT_FOUND', 'The application profile was not found.');
+  const profileDocument = await profileResult.json() as FirestoreDocument;
+  const name = String(firestoreField(profileDocument, 'name') || '');
+  const password = await decryptSecret(env, { ciphertext: row.ciphertext, nonce: row.nonce, keyVersion: row.key_version }, `app-user-password:${uid}`);
+  await sendAppUserCredentials(env, row.email, name, row.username, password);
+  await env.DB.prepare('DELETE FROM app_user_pending_credentials WHERE profile_uid = ?').bind(uid).run();
+  await patchRegistrationProfile(env, serviceToken, uid, { credentialEmailStatus: 'SENT', updatedAt: { timestampValue: new Date().toISOString() } });
+  return response({ id: uid, onboardingEmailSent: true }, 'Sign-in details sent.');
+}
+
+export async function usernameLogin(request: Request, env: WorkspaceEnv) {
+  const input = await parseJson(request);
+  const username = normalizeUsername(input.username);
+  const password = typeof input.password === 'string' ? input.password : '';
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const limiterId = `login:${await sha256(`${ip}|${username}`).then((value) => value.slice(0, 32))}`;
+  await rateLimit(env, limiterId, 'username-login', 8, 600);
+  const row = /^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)
+    ? await env.DB.prepare("SELECT profile_uid, email FROM app_user_logins WHERE username = ? AND status = 'LINKED'").bind(username).first<{ profile_uid: string; email: string }>()
+    : null;
+  if (!password || password.length > 128) jsonError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
+  const auth = await firebasePasswordRequest(env, { email: row?.email || 'unknown-username@invalid.invalid', password, returnSecureToken: true }, 'signInWithPassword');
+  if (!row || !auth.result.ok || !auth.payload?.localId || auth.payload.localId !== row.profile_uid) jsonError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
+  const serviceToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const profileResult = await fetch(`${firestoreBase(env)}/userProfiles/${encodeURIComponent(row.profile_uid)}`, { headers: { authorization: `Bearer ${serviceToken}` } });
+  if (!profileResult.ok) jsonError(401, 'INVALID_CREDENTIALS', 'Username or password is incorrect.');
+  const document = await profileResult.json() as FirestoreDocument;
+  if (firestoreField(document, 'isActive') !== true || firestoreField(document, 'status') !== 'APPROVED') jsonError(403, 'ACCOUNT_NOT_ACTIVE', 'This account is not active. Contact an administrator.');
+  const customToken = await createFirebaseCustomToken(env, row.profile_uid);
+  return response({ customToken }, 'Signed in successfully.');
+}
+
 type FirestoreValue = Record<string, unknown>;
 
 function decodeFirestoreValue(value: FirestoreValue): unknown {
@@ -1163,6 +1327,8 @@ async function deleteApplicationUser(uid: string, request: Request, env: Workspa
   await commitFirestoreWrites(env, serviceToken, removeWrites, 'metadata_updates');
   await deleteFirestoreDocuments(env, serviceToken, [...new Map(deleteDocs.map((document) => [document.name, document])).values()]);
   await env.DB.prepare('DELETE FROM workspace_identity_links WHERE profile_uid = ?').bind(uid).run();
+  await env.DB.prepare('DELETE FROM app_user_pending_credentials WHERE profile_uid = ?').bind(uid).run();
+  await env.DB.prepare('DELETE FROM app_user_logins WHERE profile_uid = ?').bind(uid).run();
   await deleteFirestoreDocuments(env, serviceToken, [
     { name: `${firestoreBase(env)}/registrationRequests/${encodeURIComponent(uid)}` },
     { name: `${firestoreBase(env)}/users/${encodeURIComponent(uid)}` },
@@ -1434,6 +1600,7 @@ export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv
     if (url.pathname === '/oauth/revoke' && request.method === 'POST') return await revokeSsoToken(request, env);
     if (url.pathname.startsWith('/oauth/')) jsonError(404, 'NOT_FOUND', 'SSO OAuth endpoint was not found.');
     if (!env.DB || typeof env.DB.prepare !== 'function') jsonError(503, 'WORKSPACE_NOT_CONFIGURED', 'Workspace storage is not configured on this Worker.');
+    if (url.pathname === '/auth/username-login' && request.method === 'POST') return await usernameLogin(request, env);
     if (url.pathname === '/api/sso/authorize/complete' && request.method === 'POST' && identity) {
       const input = await parseJson(request);
       const requestId = typeof input.requestId === 'string' ? input.requestId : '';
@@ -1463,6 +1630,9 @@ export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv
     if (url.pathname === '/api/workspace/profiles' && request.method === 'POST') {
       return await createLinkedWorkspaceProfile(request, env, identity, firebaseToken);
     }
+    if (url.pathname === '/api/workspace/app-users' && request.method === 'POST') return await createApplicationUser(request, env, identity);
+    const appUserResendMatch = url.pathname.match(/^\/api\/workspace\/app-users\/([^/]+)\/resend-credentials$/);
+    if (appUserResendMatch && request.method === 'POST') return await resendAppUserCredentials(decodeURIComponent(appUserResendMatch[1]), env, identity);
     const appUserMatch = url.pathname.match(/^\/api\/workspace\/app-users\/([^/]+)$/);
     if (appUserMatch && request.method === 'DELETE') return await deleteApplicationUser(decodeURIComponent(appUserMatch[1]), request, env, identity);
     if (!url.pathname.startsWith('/api/workspace/users')) return null;

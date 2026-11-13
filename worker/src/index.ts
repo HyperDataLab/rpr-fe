@@ -512,6 +512,10 @@ export default {
         const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
         if (workspaceResponse) return withCors(workspaceResponse, request, env);
       }
+      if (url.pathname === '/auth/username-login' && request.method === 'POST') {
+        const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
+        if (workspaceResponse) return withCors(workspaceResponse, request, env);
+      }
       if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST') {
         const token = decodeFirestoreBearer(request);
         let claims: FirebaseClaims;

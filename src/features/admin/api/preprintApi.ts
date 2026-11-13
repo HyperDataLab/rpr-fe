@@ -39,6 +39,7 @@ export type AdminUser = {
   isActive: boolean;
   status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
   mustChangePassword?: boolean;
+  credentialEmailStatus?: 'PENDING' | 'SENT' | 'FAILED';
   lastLoginAt?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -175,6 +176,7 @@ function userFrom(id: string, item: Record<string, unknown>): AdminUser {
     isActive: item.isActive === true,
     status: typeof item.status === 'string' ? item.status as AdminUser['status'] : 'PENDING',
     mustChangePassword: item.mustChangePassword === true,
+    credentialEmailStatus: item.credentialEmailStatus === 'SENT' || item.credentialEmailStatus === 'FAILED' ? item.credentialEmailStatus : 'PENDING',
     lastLoginAt: iso(item.lastLoginAt) || null,
     createdAt: iso(item.createdAt),
     updatedAt: iso(item.updatedAt),
@@ -614,8 +616,15 @@ export const preprintApi = {
     return item;
   },
 
-  async createUser(_input: { email: string; name?: string | null; username?: string | null; studentId?: string | null; major?: string | null; password?: string; role?: AdminUser['role'] }): Promise<AdminUser> {
-    throw new Error('Creating another Firebase Auth account requires the authenticated Cloudflare Worker admin route; it is not enabled in this FE build.');
+  async createUser(input: { email: string; name: string; username: string; studentId?: string | null; major?: string | null; passwordMode: 'GENERATE' | 'CUSTOM'; password?: string; role: AdminUser['role'] }): Promise<AdminUser & { onboardingEmailSent: boolean }> {
+    const result = await workerRequest<{ data: AdminUser & { onboardingEmailSent: boolean } }>('/api/workspace/app-users', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+    });
+    return result.data;
+  },
+
+  async resendUserCredentials(id: string): Promise<void> {
+    await workerRequest(`/api/workspace/app-users/${encodeURIComponent(id)}/resend-credentials`, { method: 'POST' });
   },
 
   async updateUser(id: string, input: Partial<{ email: string; name: string | null; username: string | null; studentId: string | null; major: string | null; role: AdminUser['role']; password: string }>) {

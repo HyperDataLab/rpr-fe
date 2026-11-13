@@ -225,7 +225,7 @@ export function PreprintListView() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="student-filter-toolbar">
+      <div className="student-filter-toolbar" style={{ marginBottom: 16 }}>
         {/* Status Tabs */}
         <div className="student-tabs-pills" role="tablist" aria-label={t('student.preprints.filterStatus')}>
           <button
