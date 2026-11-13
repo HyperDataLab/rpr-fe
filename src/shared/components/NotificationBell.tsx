@@ -128,6 +128,18 @@ function getNotificationIcon(type: NotificationType): { icon: ReactNode; bg: str
           </svg>
         ),
       };
+    case 'PROJECT_INVITATION':
+      return {
+        bg: '#eff8ff',
+        color: '#0071bc',
+        icon: (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="8" r="3" />
+            <circle cx="17" cy="9" r="2" />
+            <path d="M3 20v-1a6 6 0 0 1 12 0v1M16 15a4 4 0 0 1 5 4v1" />
+          </svg>
+        ),
+      };
     default:
       return {
         bg: '#f1f5f9',

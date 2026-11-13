@@ -29,6 +29,8 @@ The Admin → Accounts “Create profile” form calls `createWorkspaceProfile()
 
 The separate “Create normal account” action creates a Firebase email/password user through `POST /api/workspace/app-users`. Admins provide a unique username and contact email, then choose a generated or custom initial password. The contact email is the Firebase Auth email and receives the username/password. The browser never receives an automatically generated password; if delivery fails, the Admin list offers “Resend credentials” while the encrypted credential is retained for up to seven days. Normal accounts sign in through the username/password form at `/login`; Google Workspace sign-in remains available beside it.
 
+Research projects are available to all active students, lecturers, and admins at `/projects`. The page creates a project with its owner membership, looks up existing accounts by exact username/email, and sends pending invitations through both the in-app notification system and Resend email. Invitees accept or decline from the project page; project membership and invitation states are managed by the authenticated Worker API.
+
 Before approval, the existing Workspace account must be active in Google Directory. The exchange flow maps that verified Google identity to the approved Firebase profile; it does not create another Firebase profile, so all existing app records remain attached to the same UID.
 
 Set `NEXT_PUBLIC_R2_WORKER_URL` to the Worker base URL in the frontend environment and add the frontend's exact origin to the Worker CORS allowlist. The Firebase token is sent only in an HTTP Authorization header, never in a URL.

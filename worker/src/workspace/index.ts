@@ -1324,6 +1324,26 @@ async function deleteApplicationUser(uid: string, request: Request, env: Workspa
   // Check the Firebase Auth deletion permission before Firestore records are removed.
   // Later cleanup remains retryable because the app profile is retained until the end.
   await deleteFirebaseAuthUser(env, serviceToken, uid);
+  const ownedProjects = await env.DB.prepare('SELECT id FROM research_projects WHERE owner_uid = ?').bind(uid).all<{ id: string }>();
+  for (const project of ownedProjects.results || []) {
+    const candidates = await env.DB.prepare("SELECT user_uid AS uid FROM research_project_members WHERE project_id = ? AND user_uid != ? AND status = 'ACTIVE' ORDER BY created_at ASC, user_uid ASC")
+      .bind(project.id, uid).all<{ uid: string }>();
+    let nextOwner: { uid: string } | null = null;
+    for (const candidate of candidates.results || []) {
+      if (await getResearchProfileByUid(env, candidate.uid)) { nextOwner = candidate; break; }
+    }
+    if (!nextOwner) {
+      await env.DB.prepare('DELETE FROM research_projects WHERE id = ?').bind(project.id).run();
+      continue;
+    }
+    const changedAt = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare('UPDATE research_projects SET owner_uid = ?, updated_at = ? WHERE id = ?').bind(nextOwner.uid, changedAt, project.id),
+      env.DB.prepare("UPDATE research_project_members SET role = 'OWNER', updated_at = ? WHERE project_id = ? AND user_uid = ? AND status = 'ACTIVE'").bind(changedAt, project.id, nextOwner.uid),
+      env.DB.prepare('DELETE FROM research_project_members WHERE project_id = ? AND user_uid = ?').bind(project.id, uid),
+    ]);
+  }
+  await env.DB.prepare('DELETE FROM research_project_members WHERE user_uid = ?').bind(uid).run();
   await commitFirestoreWrites(env, serviceToken, removeWrites, 'metadata_updates');
   await deleteFirestoreDocuments(env, serviceToken, [...new Map(deleteDocs.map((document) => [document.name, document])).values()]);
   await env.DB.prepare('DELETE FROM workspace_identity_links WHERE profile_uid = ?').bind(uid).run();
@@ -1591,6 +1611,191 @@ async function revokeSsoToken(request: Request, env: WorkspaceEnv) {
   return Response.json({}, { headers: { 'cache-control': 'no-store' } });
 }
 
+type ResearchProfile = { uid: string; email: string; username: string; name: string; role: string };
+
+function researchProfile(document: FirestoreDocument): ResearchProfile | null {
+  const uid = document.name.split('/').pop() || '';
+  const email = String(firestoreField(document, 'email') || '').trim().toLowerCase();
+  const username = String(firestoreField(document, 'username') || '').trim().toLowerCase();
+  const role = String(firestoreField(document, 'role') || '');
+  if (!uid || firestoreField(document, 'isActive') !== true || firestoreField(document, 'status') !== 'APPROVED'
+    || !['ADMIN', 'LECTURER', 'STUDENT'].includes(role)) return null;
+  const name = String(firestoreField(document, 'name') || [firestoreField(document, 'firstName'), firestoreField(document, 'lastName')].filter(Boolean).join(' ') || username || email);
+  return { uid, email, username, name, role };
+}
+
+async function findResearchUser(env: WorkspaceEnv, query: string): Promise<ResearchProfile | null> {
+  const serviceToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const normalized = query.trim().toLowerCase();
+  const matches = await Promise.all([
+    listFirestoreByField(env, serviceToken, 'userProfiles', 'username', normalized),
+    listFirestoreByField(env, serviceToken, 'userProfiles', 'email', normalized),
+  ]);
+  const documents = [...matches[0], ...matches[1]];
+  return documents.map(researchProfile).find((profile): profile is ResearchProfile => Boolean(profile)) || null;
+}
+
+async function createProjectNotification(env: WorkspaceEnv, input: { id: string; userId: string; title: string; content: string; projectId: string }) {
+  const token = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const fields = Object.fromEntries(Object.entries({
+    userId: input.userId, title: input.title, content: input.content, type: 'PROJECT_INVITATION',
+    link: `/projects?project=${encodeURIComponent(input.projectId)}`, isRead: false,
+    metadata: { projectId: input.projectId }, createdAt: new Date().toISOString(),
+  }).map(([key, value]) => [key, encodeFirestoreValue(value)]));
+  const result = await fetch(`${firestoreBase(env)}/notifications?documentId=${encodeURIComponent(input.id)}`, {
+    method: 'POST', signal: AbortSignal.timeout(12000),
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!result.ok) throw new Error('In-app invitation notification could not be created.');
+}
+
+async function sendResearchInvitation(env: WorkspaceEnv, to: string, recipient: string, inviter: string, projectTitle: string, projectId: string) {
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) throw new Error('Invitation email delivery is not configured.');
+  const safe = (value: string) => htmlEscape(value);
+  const link = new URL(`/projects?project=${encodeURIComponent(projectId)}`, env.FRONTEND_URL).toString();
+  const text = `${inviter} invited you to join the research project “${projectTitle}” on HyperDataLab. Sign in to accept or decline: ${link}`;
+  const html = `<p>${safe(inviter)} invited you to join the research project <b>${safe(projectTitle)}</b> on HyperDataLab.</p><p><a href="${safe(link)}">Review invitation</a></p>`;
+  const result = await fetch('https://api.resend.com/emails', {
+    method: 'POST', signal: AbortSignal.timeout(12000),
+    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject: `HyperDataLab | Invitation to ${projectTitle}`, text: `${recipient}, ${text}`, html }),
+  });
+  if (!result.ok) throw new Error('Project invitation email delivery failed.');
+}
+
+async function researchProjectList(env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  const rows = await env.DB.prepare(`SELECT p.id, p.title, p.description, p.research_area AS researchArea, p.owner_uid AS ownerUid,
+    p.created_at AS createdAt, p.updated_at AS updatedAt, m.role AS membershipRole, m.status AS membershipStatus,
+    m.invitation_email_status AS invitationEmailStatus
+    FROM research_projects p JOIN research_project_members m ON m.project_id = p.id
+    WHERE m.user_uid = ? AND m.status IN ('ACTIVE', 'INVITED') ORDER BY p.updated_at DESC`).bind(identity.uid).all<Record<string, unknown>>();
+  const projects = rows.results || [];
+  const profiles = new Map<string, ResearchProfile | null>();
+  for (const project of projects) {
+    const ownerUid = String(project.ownerUid);
+    if (!profiles.has(ownerUid)) profiles.set(ownerUid, await getResearchProfileByUid(env, ownerUid));
+  }
+  return {
+    projects: projects.filter((project) => project.membershipStatus === 'ACTIVE').map((project) => ({ ...project, owner: profiles.get(String(project.ownerUid)) })),
+    invitations: projects.filter((project) => project.membershipStatus === 'INVITED').map((project) => ({ ...project, owner: profiles.get(String(project.ownerUid)) })),
+  };
+}
+
+async function getResearchProfileByUid(env: WorkspaceEnv, uid: string): Promise<ResearchProfile | null> {
+  const token = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const result = await fetch(`${firestoreBase(env)}/userProfiles/${encodeURIComponent(uid)}`, {
+    headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000),
+  });
+  if (result.status === 404) return null;
+  if (!result.ok) jsonError(502, 'FIRESTORE_UNAVAILABLE', 'Could not verify a project member profile.');
+  return researchProfile(await result.json() as FirestoreDocument);
+}
+
+async function researchProjectDetail(env: WorkspaceEnv, projectId: string, identity: WorkspaceIdentity) {
+  const project = await env.DB.prepare(`SELECT p.id, p.title, p.description, p.research_area AS researchArea, p.owner_uid AS ownerUid,
+    p.created_at AS createdAt, p.updated_at AS updatedAt, m.role AS membershipRole
+    FROM research_projects p JOIN research_project_members m ON m.project_id = p.id
+    WHERE p.id = ? AND m.user_uid = ? AND m.status = 'ACTIVE'`).bind(projectId, identity.uid).first<Record<string, unknown>>();
+  if (!project) jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.');
+  const rows = await env.DB.prepare(`SELECT user_uid AS userUid, role, status, invited_by_uid AS invitedByUid,
+    invitation_email_status AS invitationEmailStatus, created_at AS createdAt, responded_at AS respondedAt
+    FROM research_project_members WHERE project_id = ? AND status IN ('ACTIVE', 'INVITED') ORDER BY role DESC, created_at ASC`).bind(projectId).all<Record<string, unknown>>();
+  const members = await Promise.all((rows.results || []).map(async (member) => ({ ...member, user: await getResearchProfileByUid(env, String(member.userUid)) })));
+  return { ...project, members };
+}
+
+async function handleResearchProjects(request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  if (path === '/api/research-projects/users' && request.method === 'GET') {
+    await rateLimit(env, identity.uid, 'research-user-lookup', 30, 600);
+    const query = (url.searchParams.get('query') || '').trim();
+    if (query.length < 3 || query.length > 254) jsonError(400, 'VALIDATION_ERROR', 'Enter a username or email with at least 3 characters.');
+    const user = await findResearchUser(env, query);
+    return response({ user: user && user.uid !== identity.uid ? { uid: user.uid, username: user.username, email: user.email, name: user.name, role: user.role } : null });
+  }
+  if (path === '/api/research-projects' && request.method === 'GET') return response(await researchProjectList(env, identity));
+  if (path === '/api/research-projects' && request.method === 'POST') {
+    await rateLimit(env, identity.uid, 'research-project-create', 10, 600);
+    const input = await parseJson(request);
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    const description = typeof input.description === 'string' ? input.description.trim() : '';
+    const researchArea = typeof input.researchArea === 'string' ? input.researchArea.trim() : '';
+    if (!title || title.length > 180 || description.length > 5000 || researchArea.length > 160) jsonError(400, 'VALIDATION_ERROR', 'Enter a project title (max 180 characters); description and research area have exceeded their limits.');
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO research_projects (id, title, description, research_area, owner_uid, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, title, description, researchArea, identity.uid, now, now),
+      env.DB.prepare("INSERT INTO research_project_members (project_id, user_uid, role, status, created_at, updated_at, responded_at) VALUES (?, ?, 'OWNER', 'ACTIVE', ?, ?, ?)").bind(id, identity.uid, now, now, now),
+    ]);
+    return response({ id, title, description, researchArea, ownerUid: identity.uid, createdAt: now, updatedAt: now }, 'Research project created.', 201);
+  }
+  const detailMatch = path.match(/^\/api\/research-projects\/([^/]+)$/);
+  if (detailMatch && request.method === 'GET') return response(await researchProjectDetail(env, decodeURIComponent(detailMatch[1]), identity));
+  const invitationListMatch = path.match(/^\/api\/research-projects\/([^/]+)\/invitations$/);
+  if (invitationListMatch && request.method === 'POST') {
+    const projectId = decodeURIComponent(invitationListMatch[1]);
+    await rateLimit(env, identity.uid, 'research-project-invite', 30, 600);
+    const project = await env.DB.prepare("SELECT id, title, owner_uid AS ownerUid FROM research_projects WHERE id = ?").bind(projectId).first<{ id: string; title: string; ownerUid: string }>();
+    if (!project) jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.');
+    if (project.ownerUid !== identity.uid) jsonError(403, 'PROJECT_OWNER_REQUIRED', 'Only the project owner can invite members.');
+    const input = await parseJson(request);
+    const lookup = typeof input.usernameOrEmail === 'string' ? input.usernameOrEmail.trim() : '';
+    if (lookup.length < 3 || lookup.length > 254) jsonError(400, 'VALIDATION_ERROR', 'Enter a username or email.');
+    const invitee = await findResearchUser(env, lookup);
+    if (!invitee) jsonError(404, 'USER_NOT_FOUND', 'No active account matches that username or email.');
+    if (invitee.uid === identity.uid) jsonError(400, 'CANNOT_INVITE_SELF', 'You already own this project.');
+    const existing = await env.DB.prepare('SELECT status FROM research_project_members WHERE project_id = ? AND user_uid = ?').bind(projectId, invitee.uid).first<{ status: string }>();
+    if (existing?.status === 'ACTIVE' || existing?.status === 'INVITED') jsonError(409, 'MEMBER_ALREADY_EXISTS', 'This user is already a project member or has a pending invitation.');
+    const now = new Date().toISOString();
+    await env.DB.prepare(`INSERT INTO research_project_members (project_id, user_uid, role, status, invited_by_uid, invitation_email_status, created_at, updated_at)
+      VALUES (?, ?, 'MEMBER', 'INVITED', ?, 'PENDING', ?, ?)
+      ON CONFLICT(project_id, user_uid) DO UPDATE SET role = 'MEMBER', status = 'INVITED', invited_by_uid = excluded.invited_by_uid,
+      invitation_email_status = 'PENDING', created_at = excluded.created_at, updated_at = excluded.updated_at, responded_at = NULL`)
+      .bind(projectId, invitee.uid, identity.uid, now, now).run();
+    const inviter = await getResearchProfileByUid(env, identity.uid);
+    let notificationSent = false;
+    let emailSent = false;
+    try {
+      await createProjectNotification(env, { id: crypto.randomUUID(), userId: invitee.uid, title: 'Lời mời tham gia dự án nghiên cứu', content: `${inviter?.name || 'Một thành viên'} mời bạn tham gia dự án “${project.title}”.`, projectId });
+      notificationSent = true;
+    } catch (error) { console.error('Project invitation notification failed', error instanceof Error ? error.message : 'unknown'); }
+    try {
+      await sendResearchInvitation(env, invitee.email, invitee.name, inviter?.name || 'A HyperDataLab user', project.title, projectId);
+      emailSent = true;
+    } catch (error) { console.error('Project invitation email failed', error instanceof Error ? error.message : 'unknown'); }
+    await env.DB.prepare('UPDATE research_project_members SET invitation_email_status = ?, updated_at = ? WHERE project_id = ? AND user_uid = ? AND status = \'INVITED\'')
+      .bind(emailSent ? 'SENT' : 'FAILED', new Date().toISOString(), projectId, invitee.uid).run();
+    return response({ invited: true, notificationSent, emailSent }, emailSent && notificationSent ? 'Invitation sent.' : 'Invitation created; one or more notifications could not be delivered.', 201);
+  }
+  const responseMatch = path.match(/^\/api\/research-projects\/([^/]+)\/invitations\/([^/]+)\/(accept|decline)$/);
+  if (responseMatch && request.method === 'POST') {
+    const [, rawProjectId, rawUid, action] = responseMatch;
+    const projectId = decodeURIComponent(rawProjectId);
+    const targetUid = decodeURIComponent(rawUid);
+    if (targetUid !== identity.uid) jsonError(403, 'INVITATION_RECIPIENT_REQUIRED', 'Only the invited user can respond.');
+    const now = new Date().toISOString();
+    const result = await env.DB.prepare("UPDATE research_project_members SET status = ?, updated_at = ?, responded_at = ? WHERE project_id = ? AND user_uid = ? AND status = 'INVITED'")
+      .bind(action === 'accept' ? 'ACTIVE' : 'DECLINED', now, now, projectId, targetUid).run();
+    if (!result.meta?.changes) jsonError(409, 'INVITATION_NOT_PENDING', 'This invitation is no longer pending.');
+    return response({ projectId, status: action === 'accept' ? 'ACTIVE' : 'DECLINED' }, action === 'accept' ? 'Invitation accepted.' : 'Invitation declined.');
+  }
+  const memberMatch = path.match(/^\/api\/research-projects\/([^/]+)\/members\/([^/]+)$/);
+  if (memberMatch && request.method === 'DELETE') {
+    const projectId = decodeURIComponent(memberMatch[1]);
+    const targetUid = decodeURIComponent(memberMatch[2]);
+    const project = await env.DB.prepare('SELECT owner_uid AS ownerUid FROM research_projects WHERE id = ?').bind(projectId).first<{ ownerUid: string }>();
+    if (!project) jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.');
+    if (targetUid === project.ownerUid) jsonError(409, 'OWNER_TRANSFER_REQUIRED', 'Transfer ownership before leaving the project.');
+    if (identity.uid !== project.ownerUid && identity.uid !== targetUid) jsonError(403, 'PROJECT_MEMBER_REQUIRED', 'Only the project owner can remove another member.');
+    const result = await env.DB.prepare("DELETE FROM research_project_members WHERE project_id = ? AND user_uid = ? AND status = 'ACTIVE'").bind(projectId, targetUid).run();
+    if (!result.meta?.changes) jsonError(404, 'MEMBER_NOT_FOUND', 'Active project member not found.');
+    return response({ removed: true });
+  }
+  jsonError(404, 'NOT_FOUND', 'Research project API endpoint was not found.');
+}
+
 export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv, identity?: WorkspaceIdentity, firebaseToken = ''): Promise<Response | null> {
   const url = new URL(request.url);
   try {
@@ -1615,6 +1820,7 @@ export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv
     if (url.pathname === '/auth/google/callback' && request.method === 'GET') return await callback(request, env);
     if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST' && identity) return await exchangeWorkspaceLogin(env, identity);
     if (!identity) jsonError(401, 'UNAUTHENTICATED', 'Firebase authentication is required.');
+    if (url.pathname.startsWith('/api/research-projects')) return await handleResearchProjects(request, env, identity);
     if (url.pathname === '/auth/google/start' && request.method === 'POST') return await startOAuth(request, env, identity);
     if (url.pathname === '/auth/google/status' && request.method === 'GET') {
       await authorize(identity, 'workspace.read', env);

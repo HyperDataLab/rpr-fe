@@ -7,6 +7,7 @@ export type NotificationType =
   | 'PUBLICATION_REJECTED'
   | 'REVISION_REQUESTED'
   | 'USER_REGISTERED'
+  | 'PROJECT_INVITATION'
   | 'SYSTEM';
 
 export interface AppNotification {

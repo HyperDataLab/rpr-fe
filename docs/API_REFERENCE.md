@@ -1,6 +1,6 @@
 # Google Workspace API reference
 
-Base URL: the deployed Worker URL (the existing `NEXT_PUBLIC_R2_WORKER_URL` is reused). All endpoints except the Google OAuth callback require `Authorization: Bearer <Firebase ID token>`. A server-validated, active Firestore profile with role `ADMIN` is required. The OAuth callback is protected by a single-use D1 state transaction, nonce, and PKCE instead.
+Base URL: the deployed Worker URL (the existing `NEXT_PUBLIC_R2_WORKER_URL` is reused). All endpoints except public registration/login and the Google OAuth callback require `Authorization: Bearer <Firebase ID token>`. Workspace administration requires an active `ADMIN` profile; research-project APIs accept any active, approved application role. The OAuth callback is protected by a single-use D1 state transaction, nonce, and PKCE instead.
 
 All JSON results use:
 
@@ -30,6 +30,23 @@ Errors use:
 | POST | `/auth/google/disconnect` | Revokes the stored Google refresh token and clears the local encrypted credential. |
 | POST | `/auth/workspace/exchange` | Accepts a verified Firebase Google sign-in token for an existing Workspace address and returns a Firebase custom token for the linked app profile UID. Only the Worker returns the custom token; it never returns Google OAuth tokens. |
 | POST | `/auth/username-login` | Public username/password login. Resolves the case-insensitive username in D1, verifies the password with Firebase Identity Toolkit, checks the profile is active and approved, then returns only a Firebase custom token. Invalid username/password responses are generic and rate limited by hashed IP/username. |
+
+## Research projects
+
+All endpoints require an active, approved Firebase profile. Projects and their many-to-many membership/invitation records are stored in D1. Only exact username/email lookup is exposed; the API never lists all application users.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/research-projects` | Returns the caller's active projects and incoming pending invitations. |
+| POST | `/api/research-projects` | Creates a project `{ title, description?, researchArea? }` and an active owner membership. |
+| GET | `/api/research-projects/users?query=username-or-email` | Exact lookup of one active, approved account for invitations. |
+| GET | `/api/research-projects/:projectId` | Returns project details and active/pending members; caller must be an active member. |
+| POST | `/api/research-projects/:projectId/invitations` | Owner invites an existing user with `{ usernameOrEmail }`. Creates a pending membership, in-app notification, and Resend email. Response reports each delivery channel; invitation remains available if a delivery channel fails. |
+| POST | `/api/research-projects/:projectId/invitations/:uid/accept` | The invited user accepts, making the membership active. |
+| POST | `/api/research-projects/:projectId/invitations/:uid/decline` | The invited user declines the pending invitation. |
+| DELETE | `/api/research-projects/:projectId/members/:uid` | Owner removes an active member, or a member leaves. Owner cannot leave through this route. |
+
+When an administrator deletes an account that owns a project, ownership moves to the earliest joined active member whose application profile is still active and approved. If no such member exists, the project is deleted. The deleting account's memberships are removed from other projects.
 
 ## Users
 

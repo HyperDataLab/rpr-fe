@@ -152,6 +152,11 @@ export function StudentSidebar({
               <span className="student-sidebar__text">{t('student.sidebar.published')}</span>
             </Link>
 
+            <Link href="/projects" className={`student-sidebar__link ${isRouteActive('/projects') ? 'student-sidebar__link--active' : ''}`} onClick={onClose}>
+              <span className="student-sidebar__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2" /><path d="M3 20v-1a6 6 0 0 1 12 0v1M16 15a4 4 0 0 1 5 4v1" /></svg></span>
+              <span className="student-sidebar__text">{locale === 'vi' ? 'Dự án nghiên cứu' : 'Research projects'}</span>
+            </Link>
+
             <Link
               href="/student/versions"
               className={`student-sidebar__link ${isRouteActive('/student/versions') ? 'student-sidebar__link--active' : ''}`}
