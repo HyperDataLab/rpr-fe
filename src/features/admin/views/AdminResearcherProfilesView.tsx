@@ -9,6 +9,7 @@ type ProfileForm = Omit<ResearcherProfile, 'updatedAt' | 'researchAreas' | 'keyw
   researchAreas: string; keywords: string; education: string; employment: string;
   selectedPublications: string; projectsAndFunding: string; awardsAndService: string;
 };
+type ProfileSection = 'identity' | 'career' | 'output' | 'identifiers';
 
 const emptyForm: ProfileForm = {
   academicTitle: '', department: '', affiliation: '', biography: '', researchAreas: '', keywords: '',
@@ -41,6 +42,7 @@ export function AdminResearcherProfilesView() {
   const [search, setSearch] = useState('');
   const [role, setRole] = useState<'ALL' | AdminUser['role']>('ALL');
   const [selected, setSelected] = useState<AdminUser | null>(null);
+  const [section, setSection] = useState<ProfileSection>('identity');
   const [form, setForm] = useState<ProfileForm>(emptyForm);
   const [profileLoading, setProfileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -66,7 +68,7 @@ export function AdminResearcherProfilesView() {
   const existingCount = users.filter((user) => user.hasResearchProfile).length;
 
   const selectUser = async (user: AdminUser) => {
-    setSelected(user); setNotice(''); setError(''); setProfileLoading(true); setForm({ ...emptyForm });
+    setSelected(user); setSection('identity'); setNotice(''); setError(''); setProfileLoading(true); setForm({ ...emptyForm });
     try { setForm(toForm(await adminApi.getResearcherProfile(user.id))); }
     catch (reason) { setError(reason instanceof Error ? reason.message : (vi ? 'Không tải được hồ sơ.' : 'Unable to load profile.')); }
     finally { setProfileLoading(false); }
@@ -94,8 +96,8 @@ export function AdminResearcherProfilesView() {
     finally { setSaving(false); }
   };
 
-  const field = (key: keyof ProfileForm, label: string, placeholder = '', multiline = false) => (
-    <label className={`research-profile-field ${multiline ? 'research-profile-field--wide' : ''}`} key={key}>
+  const field = (key: keyof ProfileForm, label: string, placeholder = '', multiline = false, wide = multiline) => (
+    <label className={`research-profile-field ${wide ? 'research-profile-field--wide' : ''}`} key={key}>
       <span>{label}</span>
       {multiline
         ? <textarea value={form[key]} onChange={(event) => updateField(key, event.target.value)} placeholder={placeholder} rows={key === 'biography' ? 4 : 3} />
@@ -110,12 +112,8 @@ export function AdminResearcherProfilesView() {
           eyebrow={vi ? 'HỆ THỐNG' : 'SYSTEM'}
           title={vi ? 'Hồ sơ nhà nghiên cứu' : 'Researcher profiles'}
           description={vi ? 'Quản lý thông tin học thuật riêng cho từng tài khoản.' : 'Manage an academic profile for each account.'}
+          actions={<div className="research-profile-quick-stats"><span><strong>{users.length}</strong> {vi ? 'tài khoản' : 'accounts'}</span><span><strong>{existingCount}</strong> {vi ? 'hồ sơ đã tạo' : 'profiles started'}</span></div>}
         />
-        <div className="research-profile-summary">
-          <div><strong>{users.length}</strong><span>{vi ? 'Tài khoản' : 'Accounts'}</span></div>
-          <div><strong>{existingCount}</strong><span>{vi ? 'Đã có hồ sơ nghiên cứu' : 'Profiles started'}</span></div>
-          <p>{vi ? 'Hồ sơ gồm lĩnh vực nghiên cứu, đào tạo, công tác, công trình và mã định danh học thuật.' : 'Profiles include research interests, education, appointments, publications and scholarly identifiers.'}</p>
-        </div>
         <div className="research-profile-workspace">
           <section className="research-profile-directory" aria-label={vi ? 'Danh sách tài khoản' : 'Account directory'}>
             <div className="research-profile-directory__head">
@@ -144,31 +142,39 @@ export function AdminResearcherProfilesView() {
                   <div><span className="research-profile-kicker">{vi ? 'HỒ SƠ CỦA' : 'PROFILE FOR'}</span><h2>{selected.name || selected.email}</h2><p>{selected.email} · {selected.role}</p></div>
                   <button type="button" className="research-profile-close" onClick={() => setSelected(null)} aria-label={vi ? 'Đóng hồ sơ' : 'Close profile'}>×</button>
                 </div>
+                <div className="research-profile-tabs" role="tablist" aria-label={vi ? 'Nhóm thông tin hồ sơ' : 'Profile sections'}>
+                  {([
+                    ['identity', vi ? 'Học thuật' : 'Academic'],
+                    ['career', vi ? 'Đào tạo & công tác' : 'Career'],
+                    ['output', vi ? 'Công trình' : 'Research output'],
+                    ['identifiers', vi ? 'Định danh' : 'Identifiers'],
+                  ] as const).map(([key, label]) => <button type="button" role="tab" aria-selected={section === key} className={section === key ? 'is-active' : ''} key={key} onClick={() => { setSection(key); setNotice(''); setError(''); }}>{label}</button>)}
+                </div>
                 {profileLoading ? <div className="research-profile-empty">{vi ? 'Đang tải hồ sơ…' : 'Loading profile…'}</div> : <form onSubmit={(event) => void handleSave(event)}>
-                  <div className="research-profile-section"><h3>{vi ? 'Danh tính học thuật' : 'Academic identity'}</h3><div className="research-profile-form-grid">
+                  {section === 'identity' && <div className="research-profile-section"><h3>{vi ? 'Danh tính học thuật' : 'Academic identity'}</h3><div className="research-profile-form-grid">
                     {field('academicTitle', vi ? 'Học hàm / học vị' : 'Academic title', vi ? 'Ví dụ: TS., PGS.TS.' : 'e.g. PhD, Associate Professor')}
                     {field('department', vi ? 'Khoa / bộ môn' : 'Department')}
                     {field('affiliation', vi ? 'Cơ quan công tác' : 'Institution / affiliation')}
                     {field('website', vi ? 'Trang cá nhân' : 'Personal website', 'https://')}
                     {field('biography', vi ? 'Giới thiệu nghiên cứu' : 'Research biography', vi ? 'Tóm tắt chuyên môn, hướng nghiên cứu và kinh nghiệm…' : 'Summarize expertise, research focus and experience…', true)}
-                    {field('researchAreas', vi ? 'Lĩnh vực nghiên cứu' : 'Research areas', vi ? 'Mỗi dòng một lĩnh vực' : 'One research area per line', true)}
+                    {field('researchAreas', vi ? 'Lĩnh vực nghiên cứu' : 'Research areas', vi ? 'Mỗi dòng một lĩnh vực' : 'One research area per line', true, false)}
                     {field('keywords', vi ? 'Từ khóa chuyên môn' : 'Research keywords', vi ? 'Phân tách bằng dấu phẩy' : 'Separate with commas')}
-                  </div></div>
-                  <div className="research-profile-section"><h3>{vi ? 'Đào tạo và quá trình công tác' : 'Education and appointments'}</h3><div className="research-profile-form-grid">
-                    {field('education', vi ? 'Đào tạo / bằng cấp' : 'Education / qualifications', vi ? 'Mỗi dòng: Bằng cấp · Trường · Năm' : 'One per line: Degree · Institution · Year', true)}
-                    {field('employment', vi ? 'Quá trình công tác' : 'Employment history', vi ? 'Mỗi dòng: Chức vụ · Đơn vị · Thời gian' : 'One per line: Role · Institution · Dates', true)}
-                  </div></div>
-                  <div className="research-profile-section"><h3>{vi ? 'Công trình và hoạt động khoa học' : 'Research output and activity'}</h3><div className="research-profile-form-grid">
-                    {field('selectedPublications', vi ? 'Công trình tiêu biểu' : 'Selected publications', vi ? 'Mỗi dòng một công trình; nên ghi DOI hoặc năm' : 'One publication per line; include DOI or year', true)}
-                    {field('projectsAndFunding', vi ? 'Dự án và tài trợ' : 'Projects and funding', vi ? 'Mỗi dòng một dự án / nguồn tài trợ' : 'One project or funding source per line', true)}
+                  </div></div>}
+                  {section === 'career' && <div className="research-profile-section"><h3>{vi ? 'Đào tạo và quá trình công tác' : 'Education and appointments'}</h3><div className="research-profile-form-grid">
+                    {field('education', vi ? 'Đào tạo / bằng cấp' : 'Education / qualifications', vi ? 'Mỗi dòng: Bằng cấp · Trường · Năm' : 'One per line: Degree · Institution · Year', true, false)}
+                    {field('employment', vi ? 'Quá trình công tác' : 'Employment history', vi ? 'Mỗi dòng: Chức vụ · Đơn vị · Thời gian' : 'One per line: Role · Institution · Dates', true, false)}
+                  </div></div>}
+                  {section === 'output' && <div className="research-profile-section"><h3>{vi ? 'Công trình và hoạt động khoa học' : 'Research output and activity'}</h3><div className="research-profile-form-grid">
+                    {field('selectedPublications', vi ? 'Công trình tiêu biểu' : 'Selected publications', vi ? 'Mỗi dòng một công trình; nên ghi DOI hoặc năm' : 'One publication per line; include DOI or year', true, false)}
+                    {field('projectsAndFunding', vi ? 'Dự án và tài trợ' : 'Projects and funding', vi ? 'Mỗi dòng một dự án / nguồn tài trợ' : 'One project or funding source per line', true, false)}
                     {field('awardsAndService', vi ? 'Giải thưởng và hoạt động học thuật' : 'Awards and academic service', vi ? 'Giải thưởng, hội đồng, phản biện, hội nghề nghiệp…' : 'Awards, editorial work, reviewing, memberships…', true)}
-                  </div></div>
-                  <div className="research-profile-section"><h3>{vi ? 'Mã định danh học thuật' : 'Scholarly identifiers'}</h3><div className="research-profile-form-grid">
+                  </div></div>}
+                  {section === 'identifiers' && <div className="research-profile-section"><h3>{vi ? 'Mã định danh học thuật' : 'Scholarly identifiers'}</h3><div className="research-profile-form-grid">
                     {field('orcid', 'ORCID iD', '0000-0000-0000-0000')}
                     {field('scopusAuthorId', 'Scopus Author ID')}
                     {field('openAlexId', 'OpenAlex ID')}
                     {field('googleScholarUrl', 'Google Scholar', 'https://scholar.google.com/…')}
-                  </div></div>
+                  </div></div>}
                   {error && <p className="research-profile-alert research-profile-alert--error" role="alert">{error}</p>}
                   {notice && <p className="research-profile-alert research-profile-alert--success" role="status">{notice}</p>}
                   <div className="research-profile-savebar"><span>{vi ? 'Hồ sơ được lưu trên tài khoản này.' : 'This profile is saved to this account.'}</span><button type="submit" disabled={saving}>{saving ? (vi ? 'Đang lưu…' : 'Saving…') : (vi ? 'Lưu hồ sơ' : 'Save profile')}</button></div>
