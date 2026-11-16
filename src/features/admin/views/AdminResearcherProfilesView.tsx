@@ -10,6 +10,7 @@ type ProfileForm = Omit<ResearcherProfile, 'updatedAt' | 'researchAreas' | 'keyw
   selectedPublications: string; projectsAndFunding: string; awardsAndService: string;
 };
 type ProfileSection = 'identity' | 'career' | 'output' | 'identifiers';
+type ProfileFormKey = Extract<keyof ProfileForm, string>;
 
 const emptyForm: ProfileForm = {
   academicTitle: '', department: '', affiliation: '', biography: '', researchAreas: '', keywords: '',
@@ -96,7 +97,7 @@ export function AdminResearcherProfilesView() {
     finally { setSaving(false); }
   };
 
-  const field = (key: keyof ProfileForm, label: string, placeholder = '', multiline = false, wide = multiline) => (
+  const field = (key: ProfileFormKey, label: string, placeholder = '', multiline = false, wide = multiline) => (
     <label className={`research-profile-field ${wide ? 'research-profile-field--wide' : ''}`} key={key}>
       <span>{label}</span>
       {multiline
