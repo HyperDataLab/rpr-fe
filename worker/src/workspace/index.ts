@@ -1361,7 +1361,7 @@ async function deleteApplicationUser(uid: string, request: Request, env: Workspa
   return response({ uid, email, workspaceMailboxPreserved: true, storedFilesPreserved: true }, 'Firebase account and application data deleted; Workspace mailbox and stored files preserved.');
 }
 
-const ssoScopes = new Set(['email', 'profile', 'hyperdatalab_profile']);
+const ssoScopes = new Set(['email', 'profile', 'hyperdatalab_profile', 'research_projects:read']);
 
 type SsoClientRow = {
   client_id: string; client_secret_hash: string | null; name: string; description: string | null;
@@ -1407,7 +1407,7 @@ async function createSsoClient(request: Request, env: WorkspaceEnv, identity: Wo
   if (!['PUBLIC', 'CONFIDENTIAL'].includes(String(input.clientType))) jsonError(400, 'VALIDATION_ERROR', 'Choose PUBLIC or CONFIDENTIAL client type.');
   const clientType = input.clientType as 'PUBLIC' | 'CONFIDENTIAL';
   const scopes = Array.isArray(input.allowedScopes) ? [...new Set(input.allowedScopes.filter((scope): scope is string => typeof scope === 'string'))] : ['email', 'profile'];
-  if (!scopes.length || scopes.some((scope) => !ssoScopes.has(scope))) jsonError(400, 'VALIDATION_ERROR', 'One or more profile scopes are unsupported.');
+  if (!scopes.length || scopes.some((scope) => !ssoScopes.has(scope))) jsonError(400, 'VALIDATION_ERROR', 'One or more scopes are unsupported.');
   const clientId = `hd_${randomToken(18)}`;
   const clientSecret = clientType === 'CONFIDENTIAL' ? `hds_${randomToken(32)}` : null;
   const now = new Date().toISOString();
@@ -1432,6 +1432,27 @@ async function setSsoClientActive(clientId: string, request: Request, env: Works
   if (result.meta?.changes !== 1) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
   await audit(env, identity.uid, input.isActive ? 'SSO_CLIENT_ENABLED' : 'SSO_CLIENT_DISABLED', 'SUCCESS', clientId);
   return response({ clientId, isActive: input.isActive });
+}
+
+async function updateSsoClientScopes(clientId: string, request: Request, env: WorkspaceEnv, identity: WorkspaceIdentity) {
+  await authorize(identity, 'workspace.oauth.manage', env);
+  if (!/^hd_[A-Za-z0-9_-]{20,40}$/.test(clientId)) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  const input = await parseJson(request);
+  const scopes = Array.isArray(input.allowedScopes)
+    ? [...new Set(input.allowedScopes.filter((scope): scope is string => typeof scope === 'string'))]
+    : [];
+  if (!scopes.length || scopes.some((scope) => !ssoScopes.has(scope))) jsonError(400, 'VALIDATION_ERROR', 'Select one or more supported scopes.');
+  const now = new Date().toISOString();
+  const client = await env.DB.prepare('SELECT client_id FROM sso_clients WHERE client_id = ?').bind(clientId).first<{ client_id: string }>();
+  if (!client) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  await env.DB.batch([
+    env.DB.prepare('UPDATE sso_clients SET allowed_scopes_json = ?, updated_at = ? WHERE client_id = ?').bind(JSON.stringify(scopes), now, clientId),
+    env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL').bind(now, clientId),
+    env.DB.prepare('DELETE FROM sso_authorization_requests WHERE client_id = ?').bind(clientId),
+    env.DB.prepare('DELETE FROM sso_authorization_codes WHERE client_id = ?').bind(clientId),
+  ]);
+  await audit(env, identity.uid, 'SSO_CLIENT_SCOPES_UPDATED', 'SUCCESS', clientId, scopes.join(' '));
+  return response({ clientId, allowedScopes: scopes, tokensRevoked: true }, 'Scopes updated. Users must authorize again to receive a new token.');
 }
 
 async function deleteSsoClient(clientId: string, env: WorkspaceEnv, identity: WorkspaceIdentity) {
@@ -1471,7 +1492,7 @@ async function beginSsoAuthorization(request: Request, env: WorkspaceEnv) {
   const client = await env.DB.prepare('SELECT * FROM sso_clients WHERE client_id = ? AND is_active = 1').bind(clientId).first<SsoClientRow>();
   if (!client || !(JSON.parse(client.redirect_uris_json) as string[]).includes(redirectUri)) jsonError(400, 'INVALID_CLIENT_OR_REDIRECT_URI', 'Client or exact callback URL is not registered.');
   const allowedScopes = JSON.parse(client.allowed_scopes_json) as string[];
-  if (!scopes.length || scopes.some((scope) => !allowedScopes.includes(scope) || !ssoScopes.has(scope))) jsonError(400, 'INVALID_SCOPE', 'The client did not request an allowed profile scope.');
+  if (!scopes.length || scopes.some((scope) => !allowedScopes.includes(scope) || !ssoScopes.has(scope))) jsonError(400, 'INVALID_SCOPE', 'The client did not request an allowed scope.');
   const requestId = randomToken(24);
   const now = new Date().toISOString();
   await env.DB.prepare('DELETE FROM sso_authorization_requests WHERE expires_at <= ? OR consumed_at IS NOT NULL').bind(now).run();
@@ -1603,6 +1624,32 @@ async function ssoUserInfo(request: Request, env: WorkspaceEnv) {
   }, { headers: { 'cache-control': 'no-store' } });
 }
 
+async function authenticateSsoProjectRequest(request: Request, env: WorkspaceEnv): Promise<{ uid: string; scopes: Set<string> }> {
+  const token = request.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] || '';
+  if (!token) jsonError(401, 'INVALID_TOKEN', 'A bearer access token is required.');
+  const tokenRecord = await env.DB.prepare(`SELECT t.profile_uid, t.scopes_json, c.is_active FROM sso_access_tokens t
+    JOIN sso_clients c ON c.client_id = t.client_id
+    WHERE t.token_hash = ? AND t.expires_at > ? AND t.revoked_at IS NULL`)
+    .bind(await sha256(token), new Date().toISOString())
+    .first<{ profile_uid: string; scopes_json: string; is_active: number }>();
+  if (!tokenRecord || tokenRecord.is_active !== 1) jsonError(401, 'INVALID_TOKEN', 'Access token is invalid or expired.');
+  const scopes = new Set(JSON.parse(tokenRecord.scopes_json) as string[]);
+  if (!scopes.has('research_projects:read')) jsonError(403, 'INSUFFICIENT_SCOPE', 'The access token does not include research_projects:read.');
+
+  const serviceToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const profileResponse = await fetch(`${firestoreBase(env)}/userProfiles/${encodeURIComponent(tokenRecord.profile_uid)}`, {
+    headers: { authorization: `Bearer ${serviceToken}` }, signal: AbortSignal.timeout(8000),
+  });
+  if (!profileResponse.ok) jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
+  const profile = Object.fromEntries(Object.entries((await profileResponse.json() as FirestoreDocument).fields || {})
+    .map(([key, value]) => [key, decodeFirestoreValue(value)])) as Record<string, unknown>;
+  const email = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
+  if (profile.status !== 'APPROVED' || profile.isActive !== true || email.split('@')[1] !== configuredDomain(env)) {
+    jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
+  }
+  return { uid: tokenRecord.profile_uid, scopes };
+}
+
 async function revokeSsoToken(request: Request, env: WorkspaceEnv) {
   const input = await parseOAuthBody(request);
   const token = typeof input.token === 'string' ? input.token : '';
@@ -1691,6 +1738,79 @@ async function getResearchProfileByUid(env: WorkspaceEnv, uid: string): Promise<
   if (result.status === 404) return null;
   if (!result.ok) jsonError(502, 'FIRESTORE_UNAVAILABLE', 'Could not verify a project member profile.');
   return researchProfile(await result.json() as FirestoreDocument);
+}
+
+function encodeProjectCursor(updatedAt: string, id: string): string {
+  return btoa(JSON.stringify({ updatedAt, id })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeProjectCursor(value: string): { updatedAt: string; id: string } {
+  try {
+    if (!/^[A-Za-z0-9_-]{1,512}$/.test(value)) throw new Error('invalid cursor');
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
+    const parsed = JSON.parse(atob(base64)) as Record<string, unknown>;
+    if (typeof parsed.updatedAt !== 'string' || typeof parsed.id !== 'string' || !parsed.id || parsed.id.length > 128) throw new Error('invalid cursor');
+    return { updatedAt: parsed.updatedAt, id: parsed.id };
+  } catch {
+    jsonError(400, 'INVALID_CURSOR', 'The project cursor is invalid.');
+  }
+}
+
+async function externalResearchProjectList(request: Request, env: WorkspaceEnv, uid: string) {
+  const url = new URL(request.url);
+  const rawLimit = url.searchParams.get('limit');
+  const limit = rawLimit === null ? 50 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) jsonError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100.');
+  const cursorValue = url.searchParams.get('cursor');
+  const cursor = cursorValue ? decodeProjectCursor(cursorValue) : null;
+  const baseQuery = `SELECT p.id, p.title, p.description, p.research_area AS researchArea, p.owner_uid AS ownerUid,
+      p.created_at AS createdAt, p.updated_at AS updatedAt, m.role AS myRole, m.created_at AS joinedAt
+    FROM research_projects p JOIN research_project_members m ON m.project_id = p.id
+    WHERE m.user_uid = ? AND m.status = 'ACTIVE'`;
+  const statement = cursor
+    ? env.DB.prepare(`${baseQuery} AND (p.updated_at < ? OR (p.updated_at = ? AND p.id < ?)) ORDER BY p.updated_at DESC, p.id DESC LIMIT ?`)
+      .bind(uid, cursor.updatedAt, cursor.updatedAt, cursor.id, limit + 1)
+    : env.DB.prepare(`${baseQuery} ORDER BY p.updated_at DESC, p.id DESC LIMIT ?`).bind(uid, limit + 1);
+  const result = await statement.all<Record<string, unknown>>();
+  const rows = result.results || [];
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
+  const last = items[items.length - 1];
+  return {
+    items,
+    nextCursor: hasMore && last ? encodeProjectCursor(String(last.updatedAt), String(last.id)) : null,
+  };
+}
+
+async function externalResearchProjectDetail(env: WorkspaceEnv, projectId: string, uid: string) {
+  const project = await env.DB.prepare(`SELECT p.id, p.title, p.description, p.research_area AS researchArea, p.owner_uid AS ownerUid,
+      p.created_at AS createdAt, p.updated_at AS updatedAt, m.role AS myRole, m.created_at AS joinedAt
+    FROM research_projects p JOIN research_project_members m ON m.project_id = p.id
+    WHERE p.id = ? AND m.user_uid = ? AND m.status = 'ACTIVE'`).bind(projectId, uid).first<Record<string, unknown>>();
+  if (!project) jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.');
+  const memberRows = await env.DB.prepare(`SELECT user_uid AS userUid, role FROM research_project_members
+    WHERE project_id = ? AND status = 'ACTIVE' ORDER BY role DESC, created_at ASC`)
+    .bind(projectId).all<{ userUid: string; role: string }>();
+  const members = await Promise.all((memberRows.results || []).map(async ({ userUid, role }) => {
+    const profile = await getResearchProfileByUid(env, userUid);
+    return profile ? { name: profile.name, role } : null;
+  }));
+  return { ...project, members: members.filter((member): member is { name: string; role: string } => member !== null) };
+}
+
+async function handleExternalResearchProjectApi(request: Request, env: WorkspaceEnv) {
+  if (request.method !== 'GET') jsonError(405, 'METHOD_NOT_ALLOWED', 'Only GET is supported for this API.');
+  const { uid } = await authenticateSsoProjectRequest(request, env);
+  const url = new URL(request.url);
+  if (url.pathname === '/api/v1/me/research-projects') return response(await externalResearchProjectList(request, env, uid));
+  const detailMatch = url.pathname.match(/^\/api\/v1\/research-projects\/([^/]+)$/);
+  if (detailMatch) {
+    let projectId: string;
+    try { projectId = decodeURIComponent(detailMatch[1]); }
+    catch { jsonError(404, 'PROJECT_NOT_FOUND', 'Research project not found.'); }
+    return response(await externalResearchProjectDetail(env, projectId, uid));
+  }
+  jsonError(404, 'NOT_FOUND', 'Research project API endpoint was not found.');
 }
 
 async function researchProjectDetail(env: WorkspaceEnv, projectId: string, identity: WorkspaceIdentity) {
@@ -1832,6 +1952,7 @@ export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv
     if (url.pathname === '/oauth/revoke' && request.method === 'POST') return await revokeSsoToken(request, env);
     if (url.pathname.startsWith('/oauth/')) jsonError(404, 'NOT_FOUND', 'SSO OAuth endpoint was not found.');
     if (!env.DB || typeof env.DB.prepare !== 'function') jsonError(503, 'WORKSPACE_NOT_CONFIGURED', 'Workspace storage is not configured on this Worker.');
+    if (url.pathname.startsWith('/api/v1/')) return await handleExternalResearchProjectApi(request, env);
     if (url.pathname === '/auth/username-login' && request.method === 'POST') return await usernameLogin(request, env);
     if (url.pathname === '/api/sso/authorize/complete' && request.method === 'POST' && identity) {
       const input = await parseJson(request);
@@ -1843,6 +1964,8 @@ export async function handleWorkspaceRequest(request: Request, env: WorkspaceEnv
     const ssoClientMatch = url.pathname.match(/^\/api\/sso\/clients\/([^/]+)$/);
     if (ssoClientMatch && request.method === 'DELETE' && identity) return await deleteSsoClient(decodeURIComponent(ssoClientMatch[1]), env, identity);
     if (ssoClientMatch && request.method === 'PATCH' && identity) return await setSsoClientActive(decodeURIComponent(ssoClientMatch[1]), request, env, identity);
+    const ssoClientScopesMatch = url.pathname.match(/^\/api\/sso\/clients\/([^/]+)\/scopes$/);
+    if (ssoClientScopesMatch && request.method === 'PATCH' && identity) return await updateSsoClientScopes(decodeURIComponent(ssoClientScopesMatch[1]), request, env, identity);
     if (url.pathname.startsWith('/api/sso/')) jsonError(identity ? 404 : 401, identity ? 'NOT_FOUND' : 'UNAUTHENTICATED', identity ? 'SSO API endpoint was not found.' : 'An approved Firebase account is required.');
     if (url.pathname === '/auth/google/callback' && request.method === 'GET') return await callback(request, env);
     if (url.pathname === '/auth/workspace/exchange' && request.method === 'POST' && identity) return await exchangeWorkspaceLogin(env, identity);

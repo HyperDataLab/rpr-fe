@@ -55,6 +55,7 @@ Chỉ yêu cầu scope mà ứng dụng thật sự cần:
 | `email` | `email`, `email_verified` (email Workspace) |
 | `profile` | `name`, `picture` (avatar, nếu hồ sơ có) |
 | `hyperdatalab_profile` | `role`, `student_id`, `major` |
+| `research_projects:read` | Không thêm claim vào userinfo; cho phép gọi API danh sách và chi tiết dự án mà user đã tham gia. Xem [hướng dẫn API dự án](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md). |
 
 `sub` luôn được trả về và là UID hồ sơ ResearchPulse. Dùng `sub` làm định danh ổn định để nối/tạo user trong ứng dụng. Không dùng email làm khóa chính vì email có thể thay đổi. API không trả email cá nhân liên hệ hoặc số điện thoại.
 
@@ -69,6 +70,7 @@ const SSO = process.env.HYPERDATALAB_SSO_BASE_URL;
 const CLIENT_ID = process.env.HYPERDATALAB_SSO_CLIENT_ID;
 const CLIENT_SECRET = process.env.HYPERDATALAB_SSO_CLIENT_SECRET;
 const CALLBACK = process.env.HYPERDATALAB_SSO_CALLBACK_URL;
+// Add research_projects:read only when this relying app needs project data.
 const SCOPES = ['email', 'profile', 'hyperdatalab_profile'];
 
 const base64urlSha256 = (value) =>

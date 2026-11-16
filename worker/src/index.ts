@@ -318,6 +318,10 @@ async function canReadPublicationDetails(
 
 const ssoBrowserCorsPaths = new Set(['/oauth/token', '/oauth/userinfo', '/oauth/revoke']);
 
+function isSsoProjectApiPath(pathname: string) {
+  return pathname === '/api/v1/me/research-projects' || /^\/api\/v1\/research-projects\/[^/]+$/.test(pathname);
+}
+
 async function isRegisteredPublicSsoOrigin(origin: string, env: Env): Promise<boolean> {
   if (!origin || !env.DB) return false;
   try {
@@ -344,10 +348,10 @@ export async function corsHeaders(request: Request, env: Env) {
   const allow = (env.ALLOWED_ORIGINS || env.FRONTEND_ORIGINS).split(',').map((item) => item.trim()).filter(Boolean);
   const url = new URL(request.url);
   const isConfiguredOrigin = allow.includes(origin);
-  const isRegisteredSsoOrigin = !isConfiguredOrigin && ssoBrowserCorsPaths.has(url.pathname)
+  const isRegisteredSsoOrigin = !isConfiguredOrigin && (ssoBrowserCorsPaths.has(url.pathname) || isSsoProjectApiPath(url.pathname))
     && await isRegisteredPublicSsoOrigin(origin, env);
   const headers = new Headers({
-    'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'access-control-allow-methods': isSsoProjectApiPath(url.pathname) ? 'GET, OPTIONS' : 'GET, POST, PATCH, DELETE, OPTIONS',
     'access-control-allow-headers': 'authorization, content-type, range, if-range',
     'access-control-expose-headers': 'accept-ranges, content-range, content-length, etag',
     'access-control-max-age': '86400',
@@ -508,7 +512,7 @@ export default {
     }
 
     try {
-      if (url.pathname.startsWith('/oauth/')) {
+      if (url.pathname.startsWith('/oauth/') || url.pathname.startsWith('/api/v1/')) {
         const workspaceResponse = await handleWorkspaceRequest(request, env as import('./workspace/types').WorkspaceEnv);
         if (workspaceResponse) return withCors(workspaceResponse, request, env);
       }

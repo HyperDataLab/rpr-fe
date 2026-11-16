@@ -13,6 +13,9 @@ Supported OAuth scopes:
 - `email`: Workspace email and `email_verified`.
 - `profile`: display name and avatar when present in the application profile.
 - `hyperdatalab_profile`: application role, student ID, and major/department.
+- `research_projects:read`: read only the research projects the signed-in user has actively joined, using the project API described in [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md).
+
+Administrators choose allowed scopes when registering an application and can update them later from **Edit scopes** in Connected applications. Changing scopes revokes existing access tokens and pending authorization codes; users must authorize again.
 
 The userinfo response uses `sub` as the existing ResearchPulse profile UID. It does not include the user's personal contact email or phone number.
 

@@ -2916,8 +2916,18 @@
 .workspace-sso-admin__client-type-option svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: #0284c7; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .workspace-sso-admin__form-grid textarea { resize: vertical; }
 .workspace-sso-admin__wide { grid-column: 1 / -1; }
+.workspace-sso-admin__form-grid > button { grid-column: 1 / -1; width: 100%; }
 .workspace-sso-admin__scope-note { display: grid; gap: 4px; padding: 10px 12px; border-radius: 7px; background: #eff6ff; color: #334155; font-size: 12px; }
 .workspace-sso-admin__scope-note span { color: #64748b; }
+.workspace-sso-admin__scope-options { grid-column: 1 / -1; min-width: 0; margin: 0; border: 1px solid #dbeafe; }
+.workspace-sso-admin__scope-options legend { padding: 0 5px; color: #334155; font-size: 13px; font-weight: 650; }
+.workspace-sso-admin__scope-options > p { margin: 0 0 4px; color: #64748b; }
+.workspace-sso-admin__scope-options > label { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; justify-content: initial; gap: 10px; width: 100%; padding: 7px 0; cursor: pointer; }
+.workspace-sso-admin__scope-options input[type="checkbox"] { display: block; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin: 2px 0 0; padding: 0; border: 0; background: transparent; accent-color: #0879c9; }
+.workspace-sso-admin__scope-options label > span { display: grid; gap: 2px; }
+.workspace-sso-admin__scope-options label strong { color: #334155; font-size: 12px; font-weight: 650; }
+.workspace-sso-admin__scope-options label small { color: #64748b; font-size: 12px; }
+.workspace-sso-admin__client-scope-editor { padding: 10px 12px; }
 .workspace-sso-admin__list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 12px; }
 .workspace-sso-admin__client { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 16px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; }
 .workspace-sso-admin__client-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

@@ -4,7 +4,14 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { Button } from '@hyperdata/design-system';
 import { useTranslation } from '@/i18n';
 import { AdminPageHeader, AdminShell } from '../components';
-import { createSsoClient, deleteSsoClient, listSsoClients, setSsoClientActive, type SsoClient } from '../api/workspaceApi';
+import { createSsoClient, deleteSsoClient, listSsoClients, setSsoClientActive, updateSsoClientScopes, type SsoClient } from '../api/workspaceApi';
+
+const ssoScopeOptions = [
+  { value: 'email', label: 'email', description: 'Workspace email address' },
+  { value: 'profile', label: 'profile', description: 'Display name and avatar' },
+  { value: 'hyperdatalab_profile', label: 'hyperdatalab_profile', description: 'Role, student ID, and major' },
+  { value: 'research_projects:read', label: 'research_projects:read', description: 'Read projects the signed-in user has joined' },
+];
 
 export function AdminSsoView() {
   const { t } = useTranslation();
@@ -15,8 +22,10 @@ export function AdminSsoView() {
   const [notice, setNotice] = useState('');
   const [createdCredentials, setCreatedCredentials] = useState<{ clientId: string; clientSecret: string | null } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SsoClient | null>(null);
+  const [editingScopesClientId, setEditingScopesClientId] = useState<string | null>(null);
+  const [scopeDraft, setScopeDraft] = useState<string[]>([]);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
-  const [form, setForm] = useState({ name: '', description: '', redirectUris: '', clientType: 'CONFIDENTIAL' as SsoClient['clientType'] });
+  const [form, setForm] = useState({ name: '', description: '', redirectUris: '', clientType: 'CONFIDENTIAL' as SsoClient['clientType'], allowedScopes: ['email', 'profile', 'hyperdatalab_profile'] });
   const [clientTypeOpen, setClientTypeOpen] = useState(false);
   const [clientTypeActiveIndex, setClientTypeActiveIndex] = useState(0);
   const clientTypeRef = useRef<HTMLDivElement>(null);
@@ -87,6 +96,10 @@ export function AdminSsoView() {
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (form.allowedScopes.length === 0) {
+      setError('Select at least one permission scope.');
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice('');
@@ -96,11 +109,11 @@ export function AdminSsoView() {
         description: form.description.trim() || undefined,
         redirectUris: form.redirectUris.split(/\r?\n/).map((uri) => uri.trim()).filter(Boolean),
         clientType: form.clientType,
-        allowedScopes: ['email', 'profile', 'hyperdatalab_profile'],
+        allowedScopes: form.allowedScopes,
       });
       setCreatedCredentials({ clientId: result.client.clientId, clientSecret: result.client.clientSecret });
       setNotice('Application registered. Copy the client secret now; it is shown only once.');
-      setForm({ name: '', description: '', redirectUris: '', clientType: 'CONFIDENTIAL' });
+      setForm({ name: '', description: '', redirectUris: '', clientType: 'CONFIDENTIAL', allowedScopes: ['email', 'profile', 'hyperdatalab_profile'] });
       await refreshClients();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to register the SSO client.');
@@ -117,6 +130,26 @@ export function AdminSsoView() {
       await refreshClients();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to update the SSO client.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveScopes = async (client: SsoClient) => {
+    if (scopeDraft.length === 0) {
+      setError('Select at least one permission scope.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice('');
+    try {
+      await updateSsoClientScopes(client.clientId, scopeDraft);
+      setEditingScopesClientId(null);
+      setNotice(`Updated scopes for ${client.name}. Existing access tokens were revoked; users must sign in again.`);
+      await refreshClients();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to update application scopes.');
     } finally {
       setBusy(false);
     }
@@ -220,7 +253,23 @@ export function AdminSsoView() {
             </div>
             <label className="workspace-sso-admin__wide"><span>Description</span><input maxLength={500} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional purpose" /></label>
             <label className="workspace-sso-admin__wide"><span>Callback URL(s), one per line</span><textarea required rows={3} value={form.redirectUris} onChange={(event) => setForm({ ...form, redirectUris: event.target.value })} placeholder={'https://app.example.org/auth/callback\nhttp://localhost:3000/auth/callback'} /></label>
-            <div className="workspace-sso-admin__scope-note"><strong>Profile scopes</strong><span>email · profile · hyperdatalab_profile (role, student ID, major)</span></div>
+            <fieldset className="workspace-sso-admin__scope-note workspace-sso-admin__scope-options">
+              <legend>Permissions (scopes)</legend>
+              <p>Grant only the profile and API access this application needs.</p>
+              {ssoScopeOptions.map((scope) => <label key={scope.value}>
+                <input
+                  type="checkbox"
+                  checked={form.allowedScopes.includes(scope.value)}
+                  onChange={(event) => setForm((current) => ({
+                    ...current,
+                    allowedScopes: event.target.checked
+                      ? [...current.allowedScopes, scope.value]
+                      : current.allowedScopes.filter((item) => item !== scope.value),
+                  }))}
+                />
+                <span><strong>{scope.label}</strong><small>{scope.description}</small></span>
+              </label>)}
+            </fieldset>
             <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Registering…' : 'Register application'}</Button>
           </div>
         </form>
@@ -232,8 +281,25 @@ export function AdminSsoView() {
                 <div className="workspace-sso-admin__client-heading"><div><h3>{client.name}</h3><code>{client.clientId}</code></div><span className={`workspace-admin__user-status ${client.isActive ? 'is-active' : 'is-suspended'}`}><span />{client.isActive ? 'Active' : 'Disabled'}</span></div>
                 {client.description && <p>{client.description}</p>}
                 <div className="workspace-sso-admin__client-meta"><span>{client.clientType}</span><span>{client.allowedScopes.join(' · ')}</span></div>
+                {editingScopesClientId === client.clientId ? <fieldset className="workspace-sso-admin__scope-note workspace-sso-admin__scope-options workspace-sso-admin__client-scope-editor">
+                  <legend>Edit permissions</legend>
+                  {ssoScopeOptions.map((scope) => <label key={scope.value}>
+                    <input type="checkbox" checked={scopeDraft.includes(scope.value)} onChange={(event) => setScopeDraft((current) => event.target.checked
+                      ? [...current, scope.value]
+                      : current.filter((item) => item !== scope.value))} />
+                    <span><strong>{scope.label}</strong><small>{scope.description}</small></span>
+                  </label>)}
+                  <div className="workspace-sso-admin__client-actions">
+                    <Button variant="secondary" disabled={busy} onClick={() => setEditingScopesClientId(null)}>Cancel</Button>
+                    <Button variant="primary" disabled={busy} onClick={() => void handleSaveScopes(client)}>{busy ? 'Saving…' : 'Save scopes'}</Button>
+                  </div>
+                </fieldset> : null}
                 <div className="workspace-sso-admin__redirects"><strong>Callbacks</strong>{client.redirectUris.map((uri) => <code key={uri}>{uri}</code>)}</div>
                 <div className="workspace-sso-admin__client-actions">
+                  <Button variant="secondary" disabled={busy} onClick={() => {
+                    setScopeDraft([...client.allowedScopes]);
+                    setEditingScopesClientId(client.clientId);
+                  }}>Edit scopes</Button>
                   <Button variant="secondary" disabled={busy} onClick={() => void handleToggle(client)}>{client.isActive ? 'Disable app' : 'Enable app'}</Button>
                   <Button variant="danger" disabled={busy} onClick={() => setPendingDelete(client)}>Delete app</Button>
                 </div>

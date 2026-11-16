@@ -125,6 +125,12 @@ export async function setSsoClientActive(clientId: string, isActive: boolean) {
   }));
 }
 
+export async function updateSsoClientScopes(clientId: string, allowedScopes: string[]) {
+  return unwrap(await workerRequest<ApiEnvelope<{ clientId: string; allowedScopes: string[]; tokensRevoked: boolean }>>(`/api/sso/clients/${encodeURIComponent(clientId)}/scopes`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ allowedScopes }),
+  }));
+}
+
 export async function deleteSsoClient(clientId: string) {
   return unwrap(await workerRequest<ApiEnvelope<{ clientId: string; deleted: boolean }>>(`/api/sso/clients/${encodeURIComponent(clientId)}`, {
     method: 'DELETE',

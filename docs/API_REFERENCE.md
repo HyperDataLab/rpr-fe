@@ -33,7 +33,7 @@ Errors use:
 
 ## Research projects
 
-For the planned OAuth API for external applications to read a user's active projects, see [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md). That partner API is a design and is not implemented yet; the endpoints below are the current Firebase-authenticated application API.
+External applications can use the SSO OAuth scope `research_projects:read` with the read-only endpoints documented in [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md). The `/api/research-projects` endpoints below remain the Firebase-authenticated application API.
 
 All endpoints require an active, approved Firebase profile. Only `ADMIN` profiles can create projects; other project operations are available to active users according to their membership. Projects and their many-to-many membership/invitation records are stored in D1. Only exact username/email lookup is exposed; the API never lists all application users.
 
