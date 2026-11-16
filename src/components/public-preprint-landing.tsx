@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { HyperdataLogo } from './hyperdata-logo';
 import { PublicPortalShowcase } from './public-portal-showcase';
@@ -46,6 +46,30 @@ function scrollToRegister(e?: React.MouseEvent) {
   });
 }
 
+const RESEARCH_TOOLS = [
+  {
+    href: 'https://slr.hyperdatalab.org',
+    name: 'Systematic Literature Review',
+    description: 'Quản lý và sàng lọc nghiên cứu tổng quan có hệ thống.',
+    icon: '⌕',
+    action: 'Mở công cụ',
+  },
+  {
+    href: 'https://hyperdatalab-writing-bank.web.app',
+    name: 'Writing Bank',
+    description: 'Tham khảo tài nguyên và hướng dẫn viết học thuật.',
+    icon: '✎',
+    action: 'Khám phá tài nguyên',
+  },
+  {
+    href: 'https://aprkb.hyperdatalab.org',
+    name: 'Academic Publication Repository',
+    description: 'Tra cứu kho công bố và tài liệu nghiên cứu học thuật.',
+    icon: '▤',
+    action: 'Tra cứu kho',
+  },
+] as const;
+
 export default function PublicPreprintLanding() {
   const { t } = useTranslation();
   const [firstName, setFirstName] = useState('');
@@ -61,11 +85,20 @@ export default function PublicPreprintLanding() {
   const [copied, setCopied] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Only kept for any non-Lenis side effects if needed, 
-    // but anchor clicking and smooth scrolling is now handled globally in SmoothScrollProvider.
-  }, []);
+    if (!toolsMenuOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !toolsMenuRef.current?.contains(event.target)) {
+        setToolsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [toolsMenuOpen]);
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,6 +158,7 @@ export default function PublicPreprintLanding() {
             <a href="#workflow" className="pl-nav__link">Quy Trình</a>
             <a href="#faq" className="pl-nav__link">Hỏi Đáp</a>
             <div
+              ref={toolsMenuRef}
               className="pl-tools-menu"
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
@@ -149,26 +183,45 @@ export default function PublicPreprintLanding() {
               {toolsMenuOpen && (
                 <div className="pl-tools-menu__panel" id="pl-tools-menu-panel" aria-label="Công cụ HyperDataLab">
                   <div className="pl-tools-menu__content">
-                    <div className="pl-tools-menu__intro">
-                      <h2>Công cụ nghiên cứu</h2>
-                      <p>Khám phá các nền tảng hỗ trợ quy trình nghiên cứu và xuất bản học thuật.</p>
-                    </div>
-                    <div className="pl-tools-menu__grid">
-                      <a href="https://slr.hyperdatalab.org" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">
-                        <span className="pl-tools-menu__icon" aria-hidden="true">⌕</span>
-                        <span className="pl-tools-menu__item-copy"><strong>Systematic Literature Review</strong><span>Quản lý và sàng lọc nghiên cứu tổng quan có hệ thống.</span></span>
-                        <span className="pl-tools-menu__external" aria-hidden="true">↗</span>
-                      </a>
-                      <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">
-                        <span className="pl-tools-menu__icon" aria-hidden="true">✎</span>
-                        <span className="pl-tools-menu__item-copy"><strong>Writing Bank</strong><span>Tham khảo tài nguyên và hướng dẫn viết học thuật.</span></span>
-                        <span className="pl-tools-menu__external" aria-hidden="true">↗</span>
-                      </a>
-                      <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item">
-                        <span className="pl-tools-menu__icon" aria-hidden="true">▤</span>
-                        <span className="pl-tools-menu__item-copy"><strong>Academic Publication Repository</strong><span>Tra cứu kho công bố và tài liệu nghiên cứu học thuật.</span></span>
-                        <span className="pl-tools-menu__external" aria-hidden="true">↗</span>
-                      </a>
+                    <aside className="pl-tools-menu__intro">
+                      <div className="pl-tools-menu__art" aria-hidden="true">
+                        <svg viewBox="0 0 360 156" fill="none">
+                          <path d="M52 114h252" stroke="#B6D8EA" strokeWidth="2" strokeDasharray="5 6" />
+                          <rect x="42" y="42" width="72" height="78" rx="12" fill="#fff" stroke="#C9DFEC" strokeWidth="2" />
+                          <rect x="56" y="58" width="44" height="7" rx="3.5" fill="#9BCBE3" />
+                          <rect x="56" y="74" width="32" height="6" rx="3" fill="#D2E6F0" />
+                          <rect x="56" y="88" width="42" height="6" rx="3" fill="#D2E6F0" />
+                          <rect x="144" y="24" width="76" height="96" rx="14" fill="#EAF5FB" stroke="#9CCFE7" strokeWidth="2" />
+                          <rect x="158" y="42" width="48" height="7" rx="3.5" fill="#0879C9" />
+                          <rect x="158" y="59" width="38" height="6" rx="3" fill="#A9D1E5" />
+                          <rect x="158" y="73" width="48" height="6" rx="3" fill="#A9D1E5" />
+                          <circle cx="182" cy="98" r="9" fill="#0879C9" />
+                          <rect x="250" y="42" width="68" height="78" rx="12" fill="#fff" stroke="#C9DFEC" strokeWidth="2" />
+                          <path d="m265 79 10 10 24-25" stroke="#16865B" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                          <circle cx="75" cy="31" r="7" fill="#55A9D3" />
+                          <circle cx="290" cy="27" r="5" fill="#16865B" />
+                        </svg>
+                      </div>
+                      <div className="pl-tools-menu__intro-copy">
+                        <span className="pl-tools-menu__count">{RESEARCH_TOOLS.length} nền tảng nghiên cứu</span>
+                        <h2>Công cụ cho từng bước nghiên cứu</h2>
+                        <p>Từ tổng quan tài liệu đến viết học thuật và tra cứu công bố.</p>
+                        <a href="#portal" onClick={() => setToolsMenuOpen(false)} className="pl-tools-menu__featured-link">Khám phá HyperData Lab <span aria-hidden="true">↗</span></a>
+                      </div>
+                    </aside>
+                    <div className="pl-tools-menu__grid" aria-label="Danh sách nền tảng nghiên cứu">
+                      {RESEARCH_TOOLS.map((tool) => (
+                        <section key={tool.href} className="pl-tools-menu__item">
+                          <div className="pl-tools-menu__item-heading">
+                            <span className="pl-tools-menu__icon" aria-hidden="true">{tool.icon}</span>
+                            <h3>{tool.name}</h3>
+                          </div>
+                          <p>{tool.description}</p>
+                          <a href={tool.href} target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item-link">
+                            {tool.action}<span aria-hidden="true">↗</span>
+                          </a>
+                        </section>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -209,9 +262,9 @@ export default function PublicPreprintLanding() {
               <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Hỏi Đáp</a>
               <div className="pl-mobile-nav__tools">
                 <span className="pl-mobile-nav__tools-title">Công Cụ HyperDataLab</span>
-                <a href="https://slr.hyperdatalab.org" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Systematic Literature Review</a>
-                <a href="https://hyperdatalab-writing-bank.web.app" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Writing Bank</a>
-                <a href="https://aprkb.hyperdatalab.org" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Academic Publication Repository</a>
+                {RESEARCH_TOOLS.map((tool) => (
+                  <a key={tool.href} href={tool.href} target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">{tool.name}</a>
+                ))}
               </div>
             </div>
           </div>
