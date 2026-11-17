@@ -31,6 +31,8 @@ Errors use:
 | POST | `/auth/workspace/exchange` | Accepts a verified Firebase Google sign-in token for an existing Workspace address and returns a Firebase custom token for the linked app profile UID. Only the Worker returns the custom token; it never returns Google OAuth tokens. |
 | POST | `/auth/username-login` | Public username/password login. Resolves the case-insensitive username in D1, verifies the password with Firebase Identity Toolkit, checks the profile is active and approved, then returns only a Firebase custom token. Invalid username/password responses are generic and rate limited by hashed IP/username. |
 
+`POST /api/sso/authorize/complete` accepts a Firebase ID token and `{ "requestId": "<opaque-id>" }` after either username/password login or Workspace sign-in. It completes the pending authorization only for an existing active, approved application profile and returns the exact registered callback URL with a one-time code and the original `state`.
+
 ## Research projects
 
 External applications can use the SSO OAuth scope `research_projects:read` with the read-only endpoints documented in [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md). The `/api/research-projects` endpoints below remain the Firebase-authenticated application API.

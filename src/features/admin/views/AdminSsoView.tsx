@@ -7,7 +7,7 @@ import { AdminPageHeader, AdminShell } from '../components';
 import { createSsoClient, deleteSsoClient, listSsoClients, setSsoClientActive, updateSsoClientScopes, type SsoClient } from '../api/workspaceApi';
 
 const ssoScopeOptions = [
-  { value: 'email', label: 'email', description: 'Workspace email address' },
+  { value: 'email', label: 'email', description: 'Account email address' },
   { value: 'profile', label: 'profile', description: 'Display name and avatar' },
   { value: 'hyperdatalab_profile', label: 'hyperdatalab_profile', description: 'Role, student ID, and major' },
   { value: 'research_projects:read', label: 'research_projects:read', description: 'Read projects the signed-in user has joined' },

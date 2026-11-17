@@ -1508,11 +1508,9 @@ async function completeSsoAuthorization(request: Request, env: WorkspaceEnv, ide
   if (!/^[A-Za-z0-9_-]{24,40}$/.test(requestId)) jsonError(400, 'INVALID_AUTHORIZATION_REQUEST', 'SSO request is invalid or expired.');
   const profileApplication = await loadRegistrationApplication(env, firebaseToken, identity.uid);
   const profile = profileApplication.values;
-  const workspaceEmail = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
   if (!profileApplication.profileExists || profile.status !== 'APPROVED' || profile.isActive !== true
-    || !['ADMIN', 'LECTURER', 'STUDENT'].includes(String(profile.role))
-    || workspaceEmail.split('@')[1] !== configuredDomain(env)) {
-    jsonError(403, 'PROFILE_NOT_APPROVED', 'Only an approved, active Workspace profile can use SSO.');
+    || !['ADMIN', 'LECTURER', 'STUDENT'].includes(String(profile.role))) {
+    jsonError(403, 'PROFILE_NOT_APPROVED', 'Only an approved, active application profile can use SSO.');
   }
   const requestRow = await env.DB.prepare(`SELECT r.*, c.redirect_uris_json, c.is_active FROM sso_authorization_requests r
     JOIN sso_clients c ON c.client_id = r.client_id
@@ -1608,15 +1606,18 @@ async function ssoUserInfo(request: Request, env: WorkspaceEnv) {
   if (!profileResponse.ok) jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
   const document = await profileResponse.json() as FirestoreDocument;
   const profile = Object.fromEntries(Object.entries(document.fields || {}).map(([key, value]) => [key, decodeFirestoreValue(value)])) as Record<string, unknown>;
-  const email = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
-  if (profile.status !== 'APPROVED' || profile.isActive !== true || email.split('@')[1] !== configuredDomain(env)) {
+  const workspaceEmail = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
+  const contactEmail = typeof profile.email === 'string' ? profile.email.trim().toLowerCase() : '';
+  const email = workspaceEmail || contactEmail;
+  const scopes = new Set(JSON.parse(tokenRecord.scopes_json) as string[]);
+  if (profile.status !== 'APPROVED' || profile.isActive !== true || (scopes.has('email') && !email)) {
     jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
   }
-  const scopes = new Set(JSON.parse(tokenRecord.scopes_json) as string[]);
+  const emailVerified = workspaceEmail.length > 0 || profile.emailVerified === true;
   const name = typeof profile.name === 'string' ? profile.name : [profile.firstName, profile.lastName].filter((part) => typeof part === 'string' && part).join(' ');
   return Response.json({
     sub: tokenRecord.profile_uid,
-    ...(scopes.has('email') ? { email, email_verified: true } : {}),
+    ...(scopes.has('email') ? { email, email_verified: emailVerified } : {}),
     ...(scopes.has('profile') ? { name, picture: profile.avatarUrl || profile.photoURL || null } : {}),
     ...(scopes.has('hyperdatalab_profile') ? {
       role: profile.role, student_id: profile.studentId || null, major: profile.major || null,
@@ -1643,8 +1644,8 @@ async function authenticateSsoProjectRequest(request: Request, env: WorkspaceEnv
   if (!profileResponse.ok) jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
   const profile = Object.fromEntries(Object.entries((await profileResponse.json() as FirestoreDocument).fields || {})
     .map(([key, value]) => [key, decodeFirestoreValue(value)])) as Record<string, unknown>;
-  const email = typeof profile.workspaceEmail === 'string' ? profile.workspaceEmail.trim().toLowerCase() : '';
-  if (profile.status !== 'APPROVED' || profile.isActive !== true || email.split('@')[1] !== configuredDomain(env)) {
+  if (profile.status !== 'APPROVED' || profile.isActive !== true
+    || !['ADMIN', 'LECTURER', 'STUDENT'].includes(String(profile.role))) {
     jsonError(401, 'PROFILE_NOT_APPROVED', 'The application profile is unavailable or no longer active.');
   }
   return { uid: tokenRecord.profile_uid, scopes };
