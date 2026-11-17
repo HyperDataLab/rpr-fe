@@ -13,7 +13,8 @@ function LoginForm() {
   const requestedNextPath = searchParams.get('next');
   const nextPath = requestedNextPath?.startsWith('/') && !requestedNextPath.startsWith('//') && !requestedNextPath.includes('\\') ? requestedNextPath : null;
   const ssoRequestId = searchParams.get('sso_request') || undefined;
-  const [loading, setLoading] = useState(false);
+  const [loadingMethod, setLoadingMethod] = useState<'password' | 'workspace' | null>(null);
+  const loading = loadingMethod !== null;
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,14 +22,15 @@ function LoginForm() {
   const handlePasswordLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    setLoading(true);
-    const data = await authApi.loginWithUsername(username, password);
+    setLoadingMethod('password');
+    const data = await authApi.loginWithUsername(username, password, ssoRequestId);
     if (!data.success || !data.user) {
       setError(data.error || 'Username or password is incorrect.');
-      setLoading(false);
+      setLoadingMethod(null);
       return;
     }
-    if (nextPath) window.location.href = nextPath;
+    if (data.ssoRedirectUrl) window.location.assign(data.ssoRedirectUrl);
+    else if (nextPath) window.location.href = nextPath;
     else if (data.user.role === 'ADMIN') window.location.href = '/admin/dashboard';
     else if (data.user.role === 'LECTURER') window.location.href = '/lecturer/reviews';
     else window.location.href = '/student/my-preprints';
@@ -36,12 +38,12 @@ function LoginForm() {
 
   const handleWorkspaceLogin = async () => {
     setError(null);
-    setLoading(true);
+    setLoadingMethod('workspace');
     try {
       const data = await authApi.loginWithWorkspace(ssoRequestId);
       if (!data.success || !data.user) {
         setError(data.error || 'Google Workspace sign-in failed.');
-        setLoading(false);
+        setLoadingMethod(null);
         return;
       }
       if (data.ssoRedirectUrl) window.location.assign(data.ssoRedirectUrl);
@@ -51,7 +53,7 @@ function LoginForm() {
       else window.location.href = '/student/my-preprints';
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Google Workspace sign-in failed.');
-      setLoading(false);
+      setLoadingMethod(null);
     }
   };
 
@@ -59,10 +61,10 @@ function LoginForm() {
     <div className="auth-card" style={{ width: '100%', margin: '0 auto' }}>
       <div style={{ marginBottom: 22, textAlign: 'left' }}>
         <h2 style={{ fontSize: 24, fontWeight: 800, color: '#122331', margin: '0 0 6px', letterSpacing: '-0.02em' }}>
-          Đăng nhập bằng Google Workspace
+          Đăng nhập vào HyperData Lab
         </h2>
         <p style={{ fontSize: 13.5, color: '#647381', margin: 0, lineHeight: 1.5 }}>
-          Sử dụng tài khoản @hyperdatalab.org đã được liên kết với hồ sơ của bạn.
+          Đăng nhập bằng tài khoản thường hoặc Google Workspace đã được liên kết với hồ sơ của bạn.
         </p>
       </div>
 
@@ -77,26 +79,24 @@ function LoginForm() {
         </div>
       )}
 
-      {!ssoRequestId && <>
+
       <form onSubmit={(event) => void handlePasswordLogin(event)} style={{ display: 'grid', gap: 12, marginBottom: 22 }}>
         <label style={{ display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 650 }}>
-          Username
-          <input name="username" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} className="auth-input" placeholder="your.username" disabled={loading} />
+          Tên đăng nhập
+          <input name="username" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} className="auth-input" placeholder="Nhập tên đăng nhập" disabled={loading} />
         </label>
         <label style={{ display: 'grid', gap: 6, color: '#334155', fontSize: 13, fontWeight: 650 }}>
-          Password
-          <input name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="auth-input" placeholder="Enter your password" disabled={loading} />
+          Mật khẩu
+          <input name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className="auth-input" placeholder="Nhập mật khẩu" disabled={loading} />
         </label>
         <button type="submit" disabled={loading} aria-busy={loading} style={{ width: '100%', padding: '12px 16px', border: 0, borderRadius: 8, background: '#0071bc', color: '#fff', fontSize: 14, fontWeight: 700, cursor: loading ? 'wait' : 'pointer' }}>
-          {loading ? 'Signing in…' : 'Sign in'}
+          {loadingMethod === 'password' ? 'Đang đăng nhập...' : 'Đăng nhập bằng tài khoản thường'}
         </button>
       </form>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 18px', color: '#94a3b8', fontSize: 12 }}>
-        <span style={{ height: 1, background: '#e2e8f0', flex: 1 }} />OR<span style={{ height: 1, background: '#e2e8f0', flex: 1 }} />
+        <span style={{ height: 1, background: '#e2e8f0', flex: 1 }} />HOẶC<span style={{ height: 1, background: '#e2e8f0', flex: 1 }} />
       </div>
-      </>}
-
       <button
         type="button"
         onClick={() => void handleWorkspaceLogin()}
@@ -104,7 +104,7 @@ function LoginForm() {
         aria-busy={loading}
         style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, padding: '12px 16px', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', color: '#0f172a', fontSize: 14, fontWeight: 700, cursor: loading ? 'wait' : 'pointer' }}
       >
-        {loading ? (
+        {loadingMethod === 'workspace' ? (
           <>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true" style={{ animation: 'spin 1s linear infinite' }}>
               <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
@@ -120,7 +120,7 @@ function LoginForm() {
       </button>
 
       <p style={{ margin: '14px 0 0', color: '#647381', fontSize: 12.5, lineHeight: 1.5, textAlign: 'center' }}>
-        Chỉ tài khoản Workspace đang hoạt động và đã được quản trị viên liên kết mới có thể đăng nhập.
+        Google Workspace chỉ dành cho tài khoản trường đang hoạt động và đã được quản trị viên liên kết.
       </p>
 
       <div className="auth-card__footer" style={{ marginTop: 24, paddingTop: 18, borderTop: '1px solid #e8eef2', fontSize: 13, color: '#647381', textAlign: 'center' }}>

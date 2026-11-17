@@ -46,29 +46,72 @@ function scrollToRegister(e?: React.MouseEvent) {
   });
 }
 
+const TOOL_GROUPS = [
+  {
+    id: 'literature-review',
+    label: 'Tổng quan tài liệu',
+    order: 1,
+  },
+  {
+    id: 'academic-writing',
+    label: 'Viết học thuật',
+    order: 2,
+  },
+  {
+    id: 'publication-search',
+    label: 'Tra cứu công bố',
+    order: 3,
+  },
+  {
+    id: 'journal-analysis',
+    label: 'Phân tích tạp chí',
+    order: 4,
+  },
+] as const;
+
 const RESEARCH_TOOLS = [
   {
-    href: 'https://slr.hyperdatalab.org',
+    id: 'systematic-literature-review',
+    groupId: 'literature-review',
     name: 'Systematic Literature Review',
     description: 'Quản lý và sàng lọc nghiên cứu tổng quan có hệ thống.',
     icon: '⌕',
-    action: 'Mở công cụ',
+    url: 'https://slr.hyperdatalab.org',
+    order: 1,
   },
   {
-    href: 'https://hyperdatalab-writing-bank.web.app',
+    id: 'writing-bank',
+    groupId: 'academic-writing',
     name: 'Writing Bank',
     description: 'Tham khảo tài nguyên và hướng dẫn viết học thuật.',
     icon: '✎',
-    action: 'Khám phá tài nguyên',
+    url: 'https://hyperdatalab-writing-bank.web.app',
+    order: 1,
   },
   {
-    href: 'https://aprkb.hyperdatalab.org',
+    id: 'academic-publication-repository',
+    groupId: 'publication-search',
     name: 'Academic Publication Repository',
     description: 'Tra cứu kho công bố và tài liệu nghiên cứu học thuật.',
     icon: '▤',
-    action: 'Tra cứu kho',
+    url: 'https://aprkb.hyperdatalab.org',
+    order: 1,
+  },
+  {
+    id: 'journal-system-miner',
+    groupId: 'journal-analysis',
+    name: 'JSM – Journal System Miner',
+    description: 'Khai thác và phân tích dữ liệu hệ thống tạp chí khoa học.',
+    icon: '◈',
+    url: 'https://jsm.hyperdatalab.org/',
+    order: 1,
   },
 ] as const;
+
+const TOOL_GROUPS_WITH_TOOLS = TOOL_GROUPS
+  .filter((group) => RESEARCH_TOOLS.some((tool) => tool.groupId === group.id))
+  .sort((a, b) => a.order - b.order);
+const INITIAL_TOOL_GROUP_ID = TOOL_GROUPS_WITH_TOOLS[0]?.id ?? '';
 
 export default function PublicPreprintLanding() {
   const { t } = useTranslation();
@@ -85,20 +128,52 @@ export default function PublicPreprintLanding() {
   const [copied, setCopied] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const [activeToolGroupId, setActiveToolGroupId] = useState(INITIAL_TOOL_GROUP_ID);
+  const [expandedMobileToolGroupId, setExpandedMobileToolGroupId] = useState<string | null>(INITIAL_TOOL_GROUP_ID);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
+  const toolsMenuToggleRef = useRef<HTMLButtonElement>(null);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const mobileMenuToggleRef = useRef<HTMLButtonElement>(null);
+
+  const activeToolGroup = TOOL_GROUPS_WITH_TOOLS.find((group) => group.id === activeToolGroupId) ?? TOOL_GROUPS_WITH_TOOLS[0];
+  const activeGroupTools = activeToolGroup
+    ? RESEARCH_TOOLS.filter((tool) => tool.groupId === activeToolGroup.id).sort((a, b) => a.order - b.order)
+    : [];
 
   useEffect(() => {
-    if (!toolsMenuOpen) return;
+    if (!toolsMenuOpen && !mobileMenuOpen) return;
 
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !toolsMenuRef.current?.contains(event.target)) {
-        setToolsMenuOpen(false);
-      }
+      if (!(event.target instanceof Node)) return;
+      if (toolsMenuOpen && !toolsMenuRef.current?.contains(event.target)) setToolsMenuOpen(false);
+      if (mobileMenuOpen && !mobileMenuRef.current?.contains(event.target)) setMobileMenuOpen(false);
     };
 
     document.addEventListener('pointerdown', closeOnOutsidePointer);
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
-  }, [toolsMenuOpen]);
+  }, [toolsMenuOpen, mobileMenuOpen]);
+
+  const closeMobileMenuOnEscape = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    setMobileMenuOpen(false);
+    mobileMenuToggleRef.current?.focus();
+  };
+
+  const handleToolGroupKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const selectedIndex = TOOL_GROUPS_WITH_TOOLS.findIndex((group) => group.id === activeToolGroupId);
+    let nextIndex = selectedIndex;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') nextIndex = (selectedIndex + 1) % TOOL_GROUPS_WITH_TOOLS.length;
+    else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') nextIndex = (selectedIndex + TOOL_GROUPS_WITH_TOOLS.length - 1) % TOOL_GROUPS_WITH_TOOLS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = TOOL_GROUPS_WITH_TOOLS.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextGroup = TOOL_GROUPS_WITH_TOOLS[nextIndex];
+    setActiveToolGroupId(nextGroup.id);
+    document.getElementById(`pl-tool-group-${nextGroup.id}`)?.focus();
+  };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,18 +237,23 @@ export default function PublicPreprintLanding() {
               className="pl-tools-menu"
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
+                  event.preventDefault();
                   setToolsMenuOpen(false);
-                  event.currentTarget.querySelector('button')?.focus();
+                  toolsMenuToggleRef.current?.focus();
                 }
               }}
             >
               <button
+                ref={toolsMenuToggleRef}
                 type="button"
                 className="pl-nav__link pl-tools-menu__toggle"
                 aria-haspopup="true"
                 aria-expanded={toolsMenuOpen}
                 aria-controls="pl-tools-menu-panel"
-                onClick={() => setToolsMenuOpen((open) => !open)}
+                onClick={() => {
+                  if (!toolsMenuOpen) setActiveToolGroupId(INITIAL_TOOL_GROUP_ID);
+                  setToolsMenuOpen(!toolsMenuOpen);
+                }}
               >
                 Công Cụ
                 <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -181,48 +261,51 @@ export default function PublicPreprintLanding() {
                 </svg>
               </button>
               {toolsMenuOpen && (
-                <div className="pl-tools-menu__panel" id="pl-tools-menu-panel" aria-label="Công cụ HyperDataLab">
+                <div className="pl-tools-menu__panel" id="pl-tools-menu-panel" role="region" aria-label="Danh mục công cụ HyperData Lab">
                   <div className="pl-tools-menu__content">
-                    <aside className="pl-tools-menu__intro">
-                      <div className="pl-tools-menu__art" aria-hidden="true">
-                        <svg viewBox="0 0 360 156" fill="none">
-                          <path d="M52 114h252" stroke="#B6D8EA" strokeWidth="2" strokeDasharray="5 6" />
-                          <rect x="42" y="42" width="72" height="78" rx="12" fill="#fff" stroke="#C9DFEC" strokeWidth="2" />
-                          <rect x="56" y="58" width="44" height="7" rx="3.5" fill="#9BCBE3" />
-                          <rect x="56" y="74" width="32" height="6" rx="3" fill="#D2E6F0" />
-                          <rect x="56" y="88" width="42" height="6" rx="3" fill="#D2E6F0" />
-                          <rect x="144" y="24" width="76" height="96" rx="14" fill="#EAF5FB" stroke="#9CCFE7" strokeWidth="2" />
-                          <rect x="158" y="42" width="48" height="7" rx="3.5" fill="#0879C9" />
-                          <rect x="158" y="59" width="38" height="6" rx="3" fill="#A9D1E5" />
-                          <rect x="158" y="73" width="48" height="6" rx="3" fill="#A9D1E5" />
-                          <circle cx="182" cy="98" r="9" fill="#0879C9" />
-                          <rect x="250" y="42" width="68" height="78" rx="12" fill="#fff" stroke="#C9DFEC" strokeWidth="2" />
-                          <path d="m265 79 10 10 24-25" stroke="#16865B" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
-                          <circle cx="75" cy="31" r="7" fill="#55A9D3" />
-                          <circle cx="290" cy="27" r="5" fill="#16865B" />
-                        </svg>
-                      </div>
-                      <div className="pl-tools-menu__intro-copy">
-                        <span className="pl-tools-menu__count">{RESEARCH_TOOLS.length} nền tảng nghiên cứu</span>
-                        <h2>Công cụ cho từng bước nghiên cứu</h2>
-                        <p>Từ tổng quan tài liệu đến viết học thuật và tra cứu công bố.</p>
-                        <a href="#portal" onClick={() => setToolsMenuOpen(false)} className="pl-tools-menu__featured-link">Khám phá HyperData Lab <span aria-hidden="true">↗</span></a>
-                      </div>
-                    </aside>
-                    <div className="pl-tools-menu__grid" aria-label="Danh sách nền tảng nghiên cứu">
-                      {RESEARCH_TOOLS.map((tool) => (
-                        <section key={tool.href} className="pl-tools-menu__item">
-                          <div className="pl-tools-menu__item-heading">
-                            <span className="pl-tools-menu__icon" aria-hidden="true">{tool.icon}</span>
-                            <h3>{tool.name}</h3>
-                          </div>
-                          <p>{tool.description}</p>
-                          <a href={tool.href} target="_blank" rel="noopener noreferrer" className="pl-tools-menu__item-link">
-                            {tool.action}<span aria-hidden="true">↗</span>
-                          </a>
-                        </section>
+                    <div className="pl-tools-menu__groups" role="tablist" aria-label="Nhóm công cụ" aria-orientation="vertical" onKeyDown={handleToolGroupKeyDown}>
+                      {TOOL_GROUPS_WITH_TOOLS.map((group) => (
+                        <button
+                          key={group.id}
+                          id={`pl-tool-group-${group.id}`}
+                          type="button"
+                          role="tab"
+                          aria-selected={group.id === activeToolGroup?.id}
+                          aria-controls="pl-tools-menu-results"
+                          tabIndex={group.id === activeToolGroup?.id ? 0 : -1}
+                          className={`pl-tools-menu__group${group.id === activeToolGroup?.id ? ' is-active' : ''}`}
+                          onClick={() => setActiveToolGroupId(group.id)}
+                        >
+                          {group.label}
+                        </button>
                       ))}
                     </div>
+                    <section
+                      className="pl-tools-menu__results"
+                      id="pl-tools-menu-results"
+                      role="tabpanel"
+                      aria-labelledby={activeToolGroup ? `pl-tool-group-${activeToolGroup.id}` : undefined}
+                      tabIndex={0}
+                    >
+                      <h2>{activeToolGroup?.label}</h2>
+                      <div className="pl-tools-menu__list" aria-label={`Công cụ thuộc nhóm ${activeToolGroup?.label ?? ''}`}>
+                        {activeGroupTools.map((tool) => (
+                          <a
+                            key={tool.id}
+                            className="pl-tools-menu__row"
+                            href={tool.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => setToolsMenuOpen(false)}
+                          >
+                            <span className="pl-tools-menu__row-icon" aria-hidden="true">{tool.icon}</span>
+                            <span className="pl-tools-menu__row-name">{tool.name}</span>
+                            <span className="pl-tools-menu__row-description">{tool.description}</span>
+                            <span className="pl-tools-menu__row-arrow" aria-hidden="true">↗</span>
+                          </a>
+                        ))}
+                      </div>
+                    </section>
                   </div>
                 </div>
               )}
@@ -238,11 +321,14 @@ export default function PublicPreprintLanding() {
             </a>
           </div>
 
-          <div className="pl-mobile-nav" id="pl-mobile-menu">
+          <div className="pl-mobile-nav" id="pl-mobile-menu" ref={mobileMenuRef} onKeyDown={closeMobileMenuOnEscape}>
             <button
+              ref={mobileMenuToggleRef}
               type="button"
               className="pl-mobile-nav__toggle"
               aria-label={mobileMenuOpen ? 'Đóng menu' : 'Mở menu điều hướng'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="pl-mobile-menu-panel"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
               {mobileMenuOpen ? (
@@ -251,7 +337,7 @@ export default function PublicPreprintLanding() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
               )}
             </button>
-            <div className={`pl-mobile-nav__panel ${mobileMenuOpen ? 'pl-mobile-nav__panel--open' : ''}`}>
+            <div id="pl-mobile-menu-panel" className={`pl-mobile-nav__panel ${mobileMenuOpen ? 'pl-mobile-nav__panel--open' : ''}`}>
               <a href="#register-section" onClick={(e) => { setMobileMenuOpen(false); scrollToRegister(e); }} className="pl-mobile-nav__link pl-mobile-nav__link--cta">
                 🎓 Đăng Ký Sinh Viên
               </a>
@@ -261,10 +347,45 @@ export default function PublicPreprintLanding() {
               <a href="#workflow" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Quy Trình</a>
               <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">Hỏi Đáp</a>
               <div className="pl-mobile-nav__tools">
-                <span className="pl-mobile-nav__tools-title">Công Cụ HyperDataLab</span>
-                {RESEARCH_TOOLS.map((tool) => (
-                  <a key={tool.href} href={tool.href} target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="pl-mobile-nav__link">{tool.name}</a>
-                ))}
+                <h2 className="pl-mobile-nav__tools-title">Công Cụ HyperDataLab</h2>
+                {TOOL_GROUPS_WITH_TOOLS.map((group) => {
+                  const groupTools = RESEARCH_TOOLS.filter((tool) => tool.groupId === group.id).sort((a, b) => a.order - b.order);
+                  const expanded = expandedMobileToolGroupId === group.id;
+                  return (
+                    <section className="pl-mobile-nav__tool-group" key={group.id}>
+                      <button
+                        type="button"
+                        className={`pl-mobile-nav__tool-group-toggle${expanded ? ' is-open' : ''}`}
+                        aria-expanded={expanded}
+                        aria-controls={`pl-mobile-tools-${group.id}`}
+                        onClick={() => setExpandedMobileToolGroupId(expanded ? null : group.id)}
+                      >
+                        <span>{group.label}</span>
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                          <path d="m3.5 6 4.5 4 4.5-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      {expanded && (
+                        <div className="pl-mobile-nav__tool-list" id={`pl-mobile-tools-${group.id}`}>
+                          {groupTools.map((tool) => (
+                            <a
+                              key={tool.id}
+                              href={tool.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => setMobileMenuOpen(false)}
+                              className="pl-mobile-nav__tool-link"
+                            >
+                              <span className="pl-mobile-nav__tool-icon" aria-hidden="true">{tool.icon}</span>
+                              <span>{tool.name}</span>
+                              <span aria-hidden="true" className="pl-mobile-nav__tool-arrow">↗</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             </div>
           </div>

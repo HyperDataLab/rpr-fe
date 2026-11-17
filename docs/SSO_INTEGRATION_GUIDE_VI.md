@@ -1,6 +1,6 @@
 ﻿# Tích hợp đăng nhập HyperDataLab SSO
 
-Tài liệu này dành cho nhóm phát triển **một hệ thống khác** muốn cho người dùng đăng nhập bằng tài khoản Google Workspace đã được liên kết với hồ sơ ResearchPulse/HyperDataLab.
+Tài liệu này dành cho nhóm phát triển **một hệ thống khác** muốn cho người dùng đăng nhập bằng tài khoản ResearchPulse: tài khoản thường dùng username/mật khẩu hoặc Google Workspace đã liên kết.
 
 SSO API được cung cấp bởi Cloudflare Worker hiện có, không cần dựng SSO_BE hoặc SSO_FE riêng.
 
@@ -8,14 +8,14 @@ SSO API được cung cấp bởi Cloudflare Worker hiện có, không cần d�
 
 1. Quản trị viên đăng ký ứng dụng ở ResearchPulse → `/admin/users` → **Connected applications**.
 2. Hệ thống tích hợp tạo `state`, PKCE `code_verifier` và `code_challenge`, lưu vào session tạm của ứng dụng, rồi chuyển trình duyệt tới `/oauth/authorize`.
-3. Worker chuyển người dùng về trang `/login` của ResearchPulse. Người dùng đăng nhập bằng Google Workspace.
-4. ResearchPulse kiểm tra email Workspace có liên kết với hồ sơ Firebase đã duyệt và đang hoạt động hay không.
+3. Worker chuyển người dùng về trang `/login` của ResearchPulse. Người dùng chọn đăng nhập bằng username/mật khẩu hoặc Google Workspace.
+4. ResearchPulse xác thực tài khoản và kiểm tra hồ sơ ứng dụng đã `APPROVED`, đang hoạt động, có role được hỗ trợ.
 5. Nếu hợp lệ, Worker trả trình duyệt về callback URL đã đăng ký kèm mã authorization dùng một lần và `state`.
 6. Backend của ứng dụng đổi mã lấy bearer access token, gọi `/oauth/userinfo`, rồi tạo session đăng nhập riêng cho ứng dụng đó.
 
 ```text
 Ứng dụng bên ngoài → Worker /oauth/authorize → ResearchPulse /login
-       ← callback?code=...&state=... ← kiểm tra Workspace + hồ sơ đã duyệt
+       ← callback?code=...&state=... ← xác thực tài khoản + hồ sơ đã duyệt
 Backend ứng dụng → Worker /oauth/token → access_token
 Backend ứng dụng → Worker /oauth/userinfo → profile
 ```
@@ -24,7 +24,7 @@ Backend ứng dụng → Worker /oauth/userinfo → profile
 
 - D1 migration `0007_sso_provider.sql` đã áp dụng và Worker đã deploy.
 - Người tạo client là quản trị viên ResearchPulse.
-- Người dùng có email `@hyperdatalab.org` đã được liên kết với hồ sơ ResearchPulse `APPROVED` và `isActive: true`.
+- Người dùng có hồ sơ ResearchPulse `APPROVED`, `isActive: true` và role được hỗ trợ. Tài khoản Workspace cần email đã được liên kết; tài khoản thường dùng username/mật khẩu admin đã tạo.
 - Callback URL phải khớp chính xác URL đã đăng ký. Dùng HTTPS ở production; HTTP chỉ dùng cho `localhost`.
 - Với SPA chạy hoàn toàn trên trình duyệt, chọn loại client **Public** và đăng ký chính xác URL callback của SPA. Có thể dùng domain/port bất kỳ; Worker tự lấy origin từ callback đã đăng ký để cho phép SPA gọi các endpoint token/userinfo/revoke, không cần sửa `ALLOWED_ORIGINS` cho từng ứng dụng. Redirect về callback là điều hướng trình duyệt nên không cần CORS ở server callback. CORS chỉ áp dụng khi JavaScript tại trang callback gọi Worker.
 
@@ -52,7 +52,7 @@ Chỉ yêu cầu scope mà ứng dụng thật sự cần:
 
 | Scope | Claims trong userinfo |
 |---|---|
-| `email` | `email`, `email_verified` (email Workspace) |
+| `email` | `email`, `email_verified` (email Workspace đã xác minh hoặc email liên hệ của tài khoản thường cùng trạng thái xác minh thực tế) |
 | `profile` | `name`, `picture` (avatar, nếu hồ sơ có) |
 | `hyperdatalab_profile` | `role`, `student_id`, `major` |
 | `research_projects:read` | Không thêm claim vào userinfo; cho phép gọi API danh sách và chi tiết dự án mà user đã tham gia. Xem [hướng dẫn API dự án](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md). |
@@ -190,7 +190,7 @@ GET /oauth/authorize
   &code_challenge_method=S256
 ```
 
-The browser is redirected to ResearchPulse `/login`. After successful Workspace sign-in, the registered callback receives `?code=...&state=...`.
+The browser is redirected to ResearchPulse `/login`. The user signs in with username/password or a linked Google Workspace account. After profile checks succeed, the registered callback receives `?code=...&state=...`.
 
 ### Exchange code
 
@@ -252,7 +252,7 @@ Revoke is safe to retry. Disabling a client in the ResearchPulse admin page also
 - `INVALID_CLIENT_OR_REDIRECT_URI`: verify the exact callback URL, including scheme, port, path, and trailing slash.
 - `INVALID_SCOPE`: ensure requested scopes are enabled for this client and spell them exactly.
 - `INVALID_AUTHORIZATION_REQUEST`: generate a new `state` and PKCE pair and restart the flow; do not reuse an old code.
-- `PROFILE_NOT_APPROVED`: an administrator must approve/activate the ResearchPulse profile and link the user's Workspace email first.
+- `PROFILE_NOT_APPROVED`: an administrator must approve and activate the ResearchPulse profile. Workspace users also need a linked Workspace email.
 - `INVALID_CLIENT`: check client ID/secret and whether the client is enabled. A confidential secret cannot be recovered; create/rotate the client credentials through admin management.
 - Browser CORS error: confirm the SPA is running at the registered callback origin, the client is enabled and set to **Public**, and the Worker version with dynamic CORS is deployed. The callback server does not need to allow the Worker through its own CORS settings; browser CORS is controlled by the Worker response to SPA API requests.
 - `404` or storage error on OAuth endpoints: apply the `0007_sso_provider.sql` D1 migration and deploy the current Worker.
