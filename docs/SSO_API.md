@@ -6,18 +6,18 @@ For an end-to-end Vietnamese integration walkthrough with Node.js examples, see 
 
 ## Eligibility and profile fields
 
-A user signs in on the existing ResearchPulse `/login` page with Google Workspace. The existing Workspace exchange must resolve that Google identity to a linked Firebase profile. The SSO completion route additionally requires that profile to be `APPROVED`, active, and linked to the configured Workspace domain. It never creates a mailbox or an application profile. User info is rechecked against Firestore on each request.
+A user signs in on the existing ResearchPulse `/login` page with either an admin-provisioned username/password account or a linked Google Workspace account. SSO completion requires an existing `APPROVED`, active application profile with a supported role. It never creates a mailbox or an application profile. User info is rechecked against Firestore on each request.
 
 Supported OAuth scopes:
 
-- `email`: Workspace email and `email_verified`.
+- `email`: account email and `email_verified`. Workspace-linked accounts return their Workspace email as verified; username/password accounts return their profile email and its actual verification state.
 - `profile`: display name and avatar when present in the application profile.
 - `hyperdatalab_profile`: application role, student ID, and major/department.
 - `research_projects:read`: read only the research projects the signed-in user has actively joined, using the project API described in [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md).
 
 Administrators choose allowed scopes when registering an application and can update them later from **Edit scopes** in Connected applications. Changing scopes revokes existing access tokens and pending authorization codes; users must authorize again.
 
-The userinfo response uses `sub` as the existing ResearchPulse profile UID. It does not include the user's personal contact email or phone number.
+The userinfo response uses `sub` as the existing ResearchPulse profile UID. For username/password accounts, the `email` scope shares the profile's contact email; `email_verified` is false unless that profile's email was verified. Phone numbers are never shared.
 
 ## Register a relying application
 
@@ -37,7 +37,7 @@ Authorization endpoint:
 GET https://<worker-host>/oauth/authorize?response_type=code&client_id=<client-id>&redirect_uri=<exact-callback>&scope=email%20profile%20hyperdatalab_profile&state=<random-state>&code_challenge=<base64url-sha256-verifier>&code_challenge_method=S256
 ```
 
-The Worker validates the registered client, exact callback, scopes, state, and PKCE challenge, then redirects to the existing ResearchPulse `/login?sso_request=<opaque-id>`. After Google Workspace sign-in and the ResearchPulse profile checks succeed, the existing login page returns a short-lived one-time authorization code to the exact callback, together with the original state. The relying app must verify state.
+The Worker validates the registered client, exact callback, scopes, state, and PKCE challenge, then redirects to the existing ResearchPulse `/login?sso_request=<opaque-id>`. The user can sign in with a username/password account or Google Workspace. After authentication and the approved-profile checks succeed, the login page returns a short-lived one-time authorization code to the exact callback, together with the original state. The relying app must verify state.
 
 Exchange the code server-to-server for a confidential client. Public clients omit the secret and must still provide the PKCE verifier. Send JSON or `application/x-www-form-urlencoded`:
 

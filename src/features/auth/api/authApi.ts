@@ -14,6 +14,22 @@ import { firebaseAuth, firestoreDb } from '@/lib/firebase/client';
 
 export const USER_PROFILES = 'userProfiles';
 
+async function completeSsoAuthorization(workerUrl: string, requestId: string, firebaseIdToken: string): Promise<string> {
+  const response = await fetch(`${workerUrl}/api/sso/authorize/complete`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${firebaseIdToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId }),
+    cache: 'no-store',
+  });
+  const result = await response.json().catch(() => null) as {
+    data?: { redirectUrl?: string }; error?: { message?: string };
+  } | null;
+  if (!response.ok || !result?.data?.redirectUrl) {
+    throw new Error(result?.error?.message || 'Could not complete the external sign-in request.');
+  }
+  return result.data.redirectUrl;
+}
+
 function profileFromData(id: string, data: Record<string, unknown>): User {
   const toIso = (value: unknown) => {
     if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
@@ -51,7 +67,7 @@ export const authApi = {
     return currentUser ? loadUserProfile(currentUser.uid) : null;
   },
 
-  async loginWithUsername(username: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
+  async loginWithUsername(username: string, password: string, ssoRequestId?: string): Promise<{ success: boolean; user?: User; error?: string; ssoRedirectUrl?: string }> {
     const workerUrl = process.env.NEXT_PUBLIC_R2_WORKER_URL?.replace(/\/$/, '');
     if (!workerUrl) return { success: false, error: 'Cloudflare Worker URL is not configured.' };
     try {
@@ -67,7 +83,10 @@ export const authApi = {
         await signOut(firebaseAuth());
         return { success: false, error: 'This account is not active. Contact an administrator.' };
       }
-      return { success: true, user };
+      const ssoRedirectUrl = ssoRequestId
+        ? await completeSsoAuthorization(workerUrl, ssoRequestId, await credential.user.getIdToken())
+        : undefined;
+      return { success: true, user, ...(ssoRedirectUrl ? { ssoRedirectUrl } : {}) };
     } catch (error) {
       await signOut(firebaseAuth()).catch(() => undefined);
       return { success: false, error: error instanceof Error ? error.message : 'Username or password is incorrect.' };
@@ -139,22 +158,8 @@ export const authApi = {
         return { success: false, error: 'Email Google đăng nhập không khớp email Workspace đã được cấp.' };
       }
       if (ssoRequestId) {
-        const completeResponse = await fetch(`${workerUrl.replace(/\/$/, '')}/api/sso/authorize/complete`, {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${await credential.user.getIdToken()}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({ requestId: ssoRequestId }),
-          cache: 'no-store',
-        });
-        const completed = await completeResponse.json().catch(() => null) as {
-          data?: { redirectUrl?: string }; error?: { message?: string };
-        } | null;
-        if (!completeResponse.ok || !completed?.data?.redirectUrl) {
-          throw new Error(completed?.error?.message || 'Could not complete the external sign-in request.');
-        }
-        return { success: true, user, ssoRedirectUrl: completed.data.redirectUrl };
+        const ssoRedirectUrl = await completeSsoAuthorization(workerUrl.replace(/\/$/, ''), ssoRequestId, await credential.user.getIdToken());
+        return { success: true, user, ssoRedirectUrl };
       }
       return { success: true, user };
     } catch (error) {

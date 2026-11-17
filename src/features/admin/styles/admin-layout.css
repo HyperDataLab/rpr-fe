@@ -5133,11 +5133,6 @@
 }
 .admin-research-profiles { max-width: 1480px; margin: 0 auto; padding-bottom: 36px; }
 .admin-research-profiles .admin-page-header { margin-bottom: 20px; }
-.research-profile-summary { display: flex; align-items: center; gap: 24px; padding: 18px 22px; margin-bottom: 18px; border: 1px solid #dbe7f3; border-radius: 12px; background: linear-gradient(110deg, #eff8ff, #fff 70%); }
-.research-profile-summary > div { display: grid; gap: 2px; min-width: 120px; }
-.research-profile-summary strong { color: #0f172a; font-size: 23px; line-height: 1.1; }
-.research-profile-summary span { color: #64748b; font-size: 12px; }
-.research-profile-summary p { margin: 0 0 0 auto; max-width: 470px; color: #64748b; font-size: 13px; line-height: 1.5; }
 .research-profile-workspace { display: grid; grid-template-columns: minmax(300px, 0.78fr) minmax(480px, 1.5fr); gap: 18px; align-items: start; }
 .research-profile-directory, .research-profile-editor { min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 3px 12px rgba(15, 23, 42, .035); }
 .research-profile-directory__head { padding: 18px; border-bottom: 1px solid #edf2f7; }
@@ -5189,6 +5184,66 @@
 .research-profile-savebar button { min-height: 39px; padding: 0 16px; border: 0; border-radius: 8px; background: #0071bc; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
 .research-profile-savebar button:hover { background: #005f9e; }
 .research-profile-savebar button:disabled { opacity: .6; cursor: wait; }
-@media (max-width: 1050px) { .research-profile-workspace { grid-template-columns: minmax(270px, .8fr) minmax(0, 1.2fr); } .research-profile-summary p { max-width: 340px; } }
-@media (max-width: 800px) { .research-profile-workspace { grid-template-columns: 1fr; } .research-profile-user-list { max-height: 340px; } .research-profile-summary { flex-wrap: wrap; gap: 16px; } .research-profile-summary p { flex-basis: 100%; max-width: none; margin: 0; } }
+@media (max-width: 1050px) { .research-profile-workspace { grid-template-columns: minmax(270px, .8fr) minmax(0, 1.2fr); } }
+@media (max-width: 800px) { .research-profile-workspace { grid-template-columns: 1fr; } .research-profile-user-list { max-height: 340px; } }
 @media (max-width: 520px) { .research-profile-form-grid { grid-template-columns: 1fr; } .research-profile-field--wide { grid-column: auto; } .research-profile-editor form { padding: 0 15px 16px; } .research-profile-editor__heading { padding: 16px; } .research-profile-savebar { align-items: flex-start; flex-direction: column; } .research-profile-savebar button { width: 100%; } }
+.admin-research-profiles .ui-page-header { margin-bottom: 14px; }
+.admin-research-profiles .ui-page-header h1 { font-size: clamp(28px, 2.4vw, 36px); }
+.admin-research-profiles .ui-page-header__eyebrow { margin-bottom: 4px; }
+.admin-research-profiles .ui-page-header__description { margin-top: 6px; }
+.research-profile-workspace { gap: 14px; }
+.research-profile-directory__head { padding: 15px; }
+.research-profile-user { padding: 10px 13px; }
+.research-profile-editor__heading { padding: 16px 20px; }
+.research-profile-editor form { padding: 0 20px 16px; }
+.research-profile-section { padding: 15px 0; }
+.research-profile-form-grid { gap: 10px 12px; }
+.research-profile-field textarea { min-height: 66px; }
+.admin-research-profiles .ui-page-header { align-items: center; }
+.admin-research-profiles .ui-page-header h1 { font-size: clamp(26px, 2vw, 32px); }
+.research-profile-quick-stats { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.research-profile-quick-stats span { padding: 8px 11px; border: 1px solid #e2eaf3; border-radius: 9px; background: #fff; color: #64748b; font-size: 11px; }
+.research-profile-quick-stats strong { margin-right: 3px; color: #0f172a; font-size: 13px; }
+.research-profile-workspace { grid-template-columns: minmax(270px, .72fr) minmax(0, 1.55fr); gap: 12px; }
+.research-profile-directory, .research-profile-editor { border-color: #e5eaf1; border-radius: 12px; box-shadow: 0 5px 18px rgba(15, 23, 42, .045); }
+.research-profile-editor { position: sticky; top: 86px; max-height: calc(100dvh - 104px); overflow: auto; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.research-profile-directory { position: sticky; top: 86px; }
+.research-profile-user-list { max-height: calc(100dvh - 300px); }
+.research-profile-editor__heading { position: sticky; top: 0; z-index: 3; padding: 13px 18px; background: rgba(255, 255, 255, .96); backdrop-filter: blur(12px); }
+.research-profile-tabs { position: sticky; top: 72px; z-index: 3; display: flex; gap: 5px; overflow-x: auto; padding: 8px 14px; border-bottom: 1px solid #e8edf3; background: rgba(255, 255, 255, .96); backdrop-filter: blur(12px); }
+.research-profile-tabs button { flex: 0 0 auto; padding: 7px 11px; border: 0; border-radius: 7px; background: transparent; color: #64748b; font-size: 11px; font-weight: 650; cursor: pointer; }
+.research-profile-tabs button:hover { background: #f1f5f9; color: #334155; }
+.research-profile-tabs button.is-active { background: #eaf5ff; color: #0071bc; box-shadow: inset 0 0 0 1px #c5e5fa; }
+.research-profile-section { padding: 15px 0; border-bottom: 0; }
+.research-profile-section h3 { margin-bottom: 14px; color: #334155; font-size: 12px; }
+.research-profile-field input, .research-profile-field textarea { border-color: #e0e7ef; background: #fbfcfe; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.research-profile-field input:focus, .research-profile-field textarea:focus { background: #fff; }
+.research-profile-savebar { position: sticky; bottom: -1px; z-index: 4; margin: 0 -20px; padding: 11px 20px; border-top: 1px solid #e8edf3; background: rgba(255, 255, 255, .96); backdrop-filter: blur(12px); }
+.research-profile-placeholder { min-height: 390px; }
+@media (max-width: 800px) { .research-profile-editor, .research-profile-directory { position: static; max-height: none; } .research-profile-user-list { max-height: 340px; } .research-profile-tabs { top: 0; } .research-profile-quick-stats { width: 100%; } }
+@media (max-width: 520px) { .research-profile-quick-stats span { flex: 1; text-align: center; } .research-profile-savebar { margin: 0 -15px; padding: 12px 15px; } }
+.admin-frame:has(.admin-research-profiles) { height: 100dvh; min-height: 100dvh; overflow: hidden; }
+.admin-frame:has(.admin-research-profiles) .admin-main { height: 100dvh; min-height: 0; overflow: hidden; }
+.admin-content-scroll:has(.admin-research-profiles) { min-height: 0; overflow: hidden; }
+.admin-content:has(.admin-research-profiles) { display: flex; height: 100%; min-height: 0; box-sizing: border-box; flex-direction: column; overflow: hidden; padding: 14px 24px; }
+.admin-research-profiles { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+.admin-research-profiles .ui-page-header { flex: 0 0 auto; margin-bottom: 12px; }
+.research-profile-workspace { min-height: 0; flex: 1; align-items: stretch; }
+.research-profile-directory { position: static; display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
+.research-profile-editor { position: static; display: flex; min-height: 0; max-height: none; flex-direction: column; overflow: hidden; }
+.research-profile-user-list { max-height: none; min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #b8c6d6 transparent; }
+.research-profile-editor__heading, .research-profile-tabs, .research-profile-savebar { position: static; flex: 0 0 auto; backdrop-filter: none; }
+.admin-content:has(.admin-research-profiles) { width: 100%; max-width: none; margin: 0; padding-right: 28px; padding-left: 28px; }
+.admin-research-profiles { width: 100%; max-width: none; margin: 0; align-self: stretch; }
+.research-profile-workspace { grid-template-columns: minmax(320px, .85fr) minmax(0, 2fr); }
+@media (max-width: 800px) {
+  .admin-frame:has(.admin-research-profiles) { height: auto; min-height: 100dvh; overflow: visible; }
+  .admin-frame:has(.admin-research-profiles) .admin-main { height: auto; min-height: 100dvh; overflow: visible; }
+  .admin-content-scroll:has(.admin-research-profiles) { overflow: visible; }
+  .admin-content:has(.admin-research-profiles) { display: block; height: auto; min-height: 0; overflow: visible; padding: 22px 18px; }
+  .admin-research-profiles { display: block; height: auto; overflow: visible; }
+  .research-profile-workspace { display: grid; min-height: 0; }
+  .research-profile-directory { display: flex; max-height: none; }
+  .research-profile-editor { display: block; max-height: none; overflow: visible; }
+  .research-profile-user-list { max-height: 340px; flex: 0 0 auto; overflow-y: auto; }
+}
