@@ -12,6 +12,7 @@ export type {
   AdminUser,
   AdminUsersResponse,
   AdminVersion,
+  ResearcherProfile,
 } from './preprintApi';
 
 export const adminApi = preprintApi;

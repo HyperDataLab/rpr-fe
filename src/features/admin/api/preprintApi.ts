@@ -35,6 +35,7 @@ export type AdminUser = {
   studentId?: string | null;
   major?: string | null;
   avatarUrl?: string | null;
+  hasResearchProfile?: boolean;
   role: 'ADMIN' | 'LECTURER' | 'STUDENT';
   isActive: boolean;
   status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
@@ -52,6 +53,26 @@ export type AdminUser = {
     attemptNumber: number;
     rejectedAt: string;
   }>;
+};
+
+export type ResearcherProfile = {
+  academicTitle: string;
+  department: string;
+  affiliation: string;
+  biography: string;
+  researchAreas: string[];
+  keywords: string[];
+  orcid: string;
+  scopusAuthorId: string;
+  googleScholarUrl: string;
+  openAlexId: string;
+  website: string;
+  education: string[];
+  employment: string[];
+  selectedPublications: string[];
+  projectsAndFunding: string[];
+  awardsAndService: string[];
+  updatedAt?: string;
 };
 
 export type AdminPublication = {
@@ -172,6 +193,7 @@ function userFrom(id: string, item: Record<string, unknown>): AdminUser {
     studentId: typeof item.studentId === 'string' ? item.studentId : null,
     major: typeof item.major === 'string' ? item.major : null,
     avatarUrl: typeof item.avatarUrl === 'string' ? item.avatarUrl : null,
+    hasResearchProfile: Boolean(item.researchProfile && typeof item.researchProfile === 'object'),
     role: item.role === 'ADMIN' || item.role === 'LECTURER' ? item.role : 'STUDENT',
     isActive: item.isActive === true,
     status: typeof item.status === 'string' ? item.status as AdminUser['status'] : 'PENDING',
@@ -614,6 +636,36 @@ export const preprintApi = {
     const item = await profile(id);
     if (!item) throw new Error('User profile was not found. Legacy accounts require migration to Firebase Auth.');
     return item;
+  },
+
+  async getResearcherProfile(id: string): Promise<ResearcherProfile | null> {
+    const item = await record(PROFILES, id);
+    if (!item || !item.researchProfile || typeof item.researchProfile !== 'object') return null;
+    const value = item.researchProfile as Record<string, unknown>;
+    const list = (key: string) => Array.isArray(value[key]) ? (value[key] as unknown[]).filter((entry): entry is string => typeof entry === 'string') : [];
+    return {
+      academicTitle: typeof value.academicTitle === 'string' ? value.academicTitle : '',
+      department: typeof value.department === 'string' ? value.department : '',
+      affiliation: typeof value.affiliation === 'string' ? value.affiliation : '',
+      biography: typeof value.biography === 'string' ? value.biography : '',
+      researchAreas: list('researchAreas'), keywords: list('keywords'),
+      orcid: typeof value.orcid === 'string' ? value.orcid : '',
+      scopusAuthorId: typeof value.scopusAuthorId === 'string' ? value.scopusAuthorId : '',
+      googleScholarUrl: typeof value.googleScholarUrl === 'string' ? value.googleScholarUrl : '',
+      openAlexId: typeof value.openAlexId === 'string' ? value.openAlexId : '',
+      website: typeof value.website === 'string' ? value.website : '',
+      education: list('education'), employment: list('employment'),
+      selectedPublications: list('selectedPublications'), projectsAndFunding: list('projectsAndFunding'),
+      awardsAndService: list('awardsAndService'),
+      updatedAt: iso(value.updatedAt) || undefined,
+    };
+  },
+
+  async saveResearcherProfile(id: string, profile: Omit<ResearcherProfile, 'updatedAt'>) {
+    await updateDoc(doc(db(), PROFILES, id), {
+      researchProfile: { ...profile, updatedAt: serverTimestamp() },
+      updatedAt: serverTimestamp(),
+    });
   },
 
   async createUser(input: { email: string; name: string; username: string; studentId?: string | null; major?: string | null; passwordMode: 'GENERATE' | 'CUSTOM'; password?: string; role: AdminUser['role'] }): Promise<AdminUser & { onboardingEmailSent: boolean }> {
