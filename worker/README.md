@@ -50,4 +50,6 @@ Wrangler prints the deployed `workers.dev` URL. Set its origin as `NEXT_PUBLIC_R
 
 The `PUBLICATION_PDFS` binding and `storage-pdf` bucket are declared in `wrangler.toml`. Do not place R2 S3 credentials in FE environment variables; the Worker accesses the bucket through the binding. Set `FRONTEND_ORIGINS` to exact browser origins. Firebase service-account JSON and Resend API key are Worker secrets; see `.dev.vars.example` and the setup guide.
 
+OAuth browser CORS normally derives SPA origins from callbacks registered on active Public SSO clients. `SSO_BROWSER_ORIGINS` is a comma-separated exact-origin override for `/oauth/token`, `/oauth/userinfo`, and `/oauth/revoke` only; do not add an app origin to `ALLOWED_ORIGINS` unless it needs browser access to the Worker's other APIs too.
+
 Run the isolated Worker tests with `npm run worker:test`. Deploy only after creating/binding D1 and configuring production OAuth values and secrets.

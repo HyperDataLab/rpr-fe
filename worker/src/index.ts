@@ -26,6 +26,7 @@ interface Env {
   GROBID_GATEWAY_TOKEN?: string;
   DB: import('./workspace/types').D1Database;
   ALLOWED_ORIGINS?: string;
+  SSO_BROWSER_ORIGINS?: string;
   FRONTEND_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -348,7 +349,9 @@ export async function corsHeaders(request: Request, env: Env) {
   const allow = (env.ALLOWED_ORIGINS || env.FRONTEND_ORIGINS).split(',').map((item) => item.trim()).filter(Boolean);
   const url = new URL(request.url);
   const isConfiguredOrigin = allow.includes(origin);
-  const isRegisteredSsoOrigin = !isConfiguredOrigin && (ssoBrowserCorsPaths.has(url.pathname) || isSsoProjectApiPath(url.pathname))
+  const ssoBrowserAllow = (env.SSO_BROWSER_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean);
+  const isConfiguredSsoOrigin = ssoBrowserCorsPaths.has(url.pathname) && ssoBrowserAllow.includes(origin);
+  const isRegisteredSsoOrigin = !isConfiguredOrigin && !isConfiguredSsoOrigin && (ssoBrowserCorsPaths.has(url.pathname) || isSsoProjectApiPath(url.pathname))
     && await isRegisteredPublicSsoOrigin(origin, env);
   const headers = new Headers({
     'access-control-allow-methods': isSsoProjectApiPath(url.pathname) ? 'GET, OPTIONS' : 'GET, POST, PATCH, DELETE, OPTIONS',
@@ -357,7 +360,7 @@ export async function corsHeaders(request: Request, env: Env) {
     'access-control-max-age': '86400',
     vary: 'Origin',
   });
-  if (isConfiguredOrigin || isRegisteredSsoOrigin) headers.set('access-control-allow-origin', origin);
+  if (isConfiguredOrigin || isConfiguredSsoOrigin || isRegisteredSsoOrigin) headers.set('access-control-allow-origin', origin);
   return headers;
 }
 
