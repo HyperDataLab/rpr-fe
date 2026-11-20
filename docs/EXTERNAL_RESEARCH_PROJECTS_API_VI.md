@@ -6,7 +6,7 @@ Tài liệu dành cho ứng dụng bên ngoài cần đọc danh sách và thôn
 
 ## 1. Điều kiện tích hợp
 
-Quản trị viên đăng ký ứng dụng tại ResearchPulse → **Admin → Users → Connected applications**, khai báo callback URL chính xác và chọn scope `research_projects:read`. Với client đã đăng ký, dùng **Edit scopes** để thêm quyền này. Thay đổi scope sẽ thu hồi access token và authorization code hiện có; người dùng cần đăng nhập lại. Scope này chỉ cấp quyền đọc các dự án mà người dùng đã tham gia. Ứng dụng đăng nhập qua OAuth Authorization Code + PKCE như hướng dẫn tại [SSO_INTEGRATION_GUIDE_VI.md](./SSO_INTEGRATION_GUIDE_VI.md).
+Quản trị viên đăng ký ứng dụng tại ResearchPulse → **Admin → Users → Connected applications**, khai báo callback URL chính xác và chọn scope `research_projects:read`. Với client đã đăng ký, dùng **Edit scopes** để thêm quyền này. Thay đổi scope sẽ thu hồi access token, refresh token và authorization code hiện có; người dùng cần đăng nhập lại. Scope này chỉ cấp quyền đọc các dự án mà người dùng đã tham gia. Ứng dụng đăng nhập qua OAuth Authorization Code + PKCE như hướng dẫn tại [SSO_INTEGRATION_GUIDE_VI.md](./SSO_INTEGRATION_GUIDE_VI.md).
 
 Các scope khả dụng: `email`, `profile`, `hyperdatalab_profile`, `research_projects:read`. Scope được giới hạn theo client và phải được yêu cầu trong OAuth authorization request. Nếu quản trị viên thay đổi scope đã cấp, người dùng cần đăng nhập lại để nhận access token mới. Với confidential client, đổi authorization code ở backend và giữ client secret trong secret manager. Với public client, không nhúng secret vào ứng dụng; luôn dùng PKCE.
 
@@ -23,7 +23,7 @@ Authorization: Bearer <access_token>
 Accept: application/json
 ```
 
-Token có thời hạn theo phản hồi `/oauth/token` (hiện tại là 3600 giây). Khi hết hạn hoặc scope client thay đổi, ứng dụng cần khởi động lại luồng OAuth; Worker hiện không cấp refresh token. Không ghi token vào URL, log hoặc mã nguồn phía client.
+Access token có thời hạn theo phản hồi `/oauth/token` (hiện tại là 3600 giây). Dùng `grant_type=refresh_token` trên `/oauth/token` để lấy access token mới mà không cần người dùng đăng nhập lại. Refresh token có hạn cố định 30 ngày từ lần cấp đầu tiên và được xoay vòng mỗi lần dùng thành công; luôn lưu refresh token mới và bỏ token cũ. Nếu refresh token hết hạn, bị thu hồi, scope client thay đổi hoặc hồ sơ không còn đủ điều kiện, ứng dụng cần khởi động lại luồng OAuth. Không ghi token vào URL, log hoặc mã nguồn phía client.
 
 ## 3. Lấy danh sách dự án
 

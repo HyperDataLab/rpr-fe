@@ -16,13 +16,13 @@ SSO API được cung cấp bởi Cloudflare Worker hiện có, không cần d�
 ```text
 Ứng dụng bên ngoài → Worker /oauth/authorize → ResearchPulse /login
        ← callback?code=...&state=... ← xác thực tài khoản + hồ sơ đã duyệt
-Backend ứng dụng → Worker /oauth/token → access_token
+Backend ứng dụng → Worker /oauth/token → access_token + refresh_token
 Backend ứng dụng → Worker /oauth/userinfo → profile
 ```
 
 ## 2. Điều kiện trước khi tích hợp
 
-- D1 migration `0007_sso_provider.sql` đã áp dụng và Worker đã deploy.
+- D1 migration mới nhất `0010_sso_refresh_tokens.sql` đã áp dụng và Worker đã deploy.
 - Người tạo client là quản trị viên ResearchPulse.
 - Người dùng có hồ sơ ResearchPulse `APPROVED`, `isActive: true` và role được hỗ trợ. Tài khoản Workspace cần email đã được liên kết; tài khoản thường dùng username/mật khẩu admin đã tạo.
 - Callback URL phải khớp chính xác URL đã đăng ký. Dùng HTTPS ở production; HTTP chỉ dùng cho `localhost`.
@@ -153,6 +153,7 @@ app.get('/auth/hyperdatalab/callback', async (req, res, next) => {
       major: profile.major,
     };
     req.session.ssoAccessToken = tokenBody.access_token;
+    req.session.ssoRefreshToken = tokenBody.refresh_token;
     res.redirect('/');
   } catch (error) {
     next(error);
@@ -171,7 +172,7 @@ Adapt the session calls and account lookup to the framework in use. Cookie sessi
 
 ## 6. SPA-only integration (Public client)
 
-A SPA must not have a client secret. Register a **Public** client and use the same Authorization Code + PKCE flow. Store `state` and `code_verifier` in `sessionStorage` for the short callback round-trip, validate state before exchanging the code, and clear both values after use. Register the exact callback URL served by the SPA; any domain or port is supported. The Worker derives the CORS origin from that callback for `/oauth/token`, `/oauth/userinfo`, and `/oauth/revoke`. The browser's top-level redirect to the callback does not use CORS, so the callback server does not need CORS configuration just to receive the redirect. The access token remains sensitive: keep it in memory where possible and never write it to a URL or logs.
+A SPA must not have a client secret. Register a **Public** client and use the same Authorization Code + PKCE flow. Store `state` and `code_verifier` in `sessionStorage` for the short callback round-trip, validate state before exchanging the code, and clear both values after use. Register the exact callback URL served by the SPA; any domain or port is supported. The Worker derives the CORS origin from that callback for `/oauth/token`, `/oauth/userinfo`, and `/oauth/revoke`. The browser's top-level redirect to the callback does not use CORS, so the callback server does not need CORS configuration just to receive the redirect. Both access and refresh tokens are sensitive. Keep them in protected storage where possible and never write them to a URL or logs. The access token expires after one hour. The refresh token expires 30 days after initial authorization and rotates on every successful refresh; save the new refresh token and discard the previous one.
 
 If the application has a backend, prefer the server-side flow above so tokens and profile data stay off the browser.
 
@@ -208,11 +209,26 @@ Success response:
   "access_token": "<opaque-bearer-token>",
   "token_type": "Bearer",
   "expires_in": 3600,
+  "refresh_token": "<opaque-refresh-token>",
+  "refresh_token_expires_in": 2592000,
   "scope": "email profile hyperdatalab_profile"
 }
 ```
 
-The endpoint also accepts HTTP Basic client authentication for Confidential clients. Public clients omit the secret. No refresh token or ID token is issued; when the one-hour access token expires, repeat authorization.
+The endpoint also accepts HTTP Basic client authentication for Confidential clients. Public clients omit the secret. The refresh token has a fixed 30-day lifetime from initial authorization; rotation does not extend that deadline. If it expires or the profile is no longer eligible, repeat authorization. No OpenID Connect ID token is issued.
+
+### Refresh access token
+
+Call this endpoint when the access token expires or shortly before it does. Serialize refresh attempts so simultaneous requests do not reuse the same refresh token.
+
+```http
+POST /oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&client_id=<client-id>&client_secret=<secret>&refresh_token=<current-refresh-token>
+```
+
+Public clients omit `client_secret`; confidential clients may use HTTP Basic authentication. The response has the same token fields as the initial exchange. Replace both stored values with `access_token` and `refresh_token` from the response. If a rotated token is reused, the Worker revokes its token family and returns `INVALID_GRANT`; the user must authorize again.
 
 ### Userinfo
 
@@ -242,10 +258,10 @@ Example response (fields vary with requested scopes):
 POST /oauth/revoke
 Content-Type: application/json
 
-{"token":"<access-token>"}
+{"token":"<access-or-refresh-token>"}
 ```
 
-Revoke is safe to retry. Disabling a client in the ResearchPulse admin page also blocks its tokens from userinfo.
+Revoke is safe to retry. Passing either token revokes the associated token family. Disabling a client in the ResearchPulse admin page also invalidates its tokens.
 
 ## 8. Operational notes and troubleshooting
 
@@ -255,6 +271,6 @@ Revoke is safe to retry. Disabling a client in the ResearchPulse admin page also
 - `PROFILE_NOT_APPROVED`: an administrator must approve and activate the ResearchPulse profile. Workspace users also need a linked Workspace email.
 - `INVALID_CLIENT`: check client ID/secret and whether the client is enabled. A confidential secret cannot be recovered; create/rotate the client credentials through admin management.
 - Browser CORS error: confirm the SPA is running at the registered callback origin, the client is enabled and set to **Public**, and the Worker version with dynamic CORS is deployed. The callback server does not need to allow the Worker through its own CORS settings; browser CORS is controlled by the Worker response to SPA API requests.
-- `404` or storage error on OAuth endpoints: apply the `0007_sso_provider.sql` D1 migration and deploy the current Worker.
-- The OAuth userinfo API is not OpenID Connect: there is no discovery document, OIDC `id_token`, or refresh token. Integrators must use `/oauth/userinfo` and manage a local session.
+- `404` or storage error on OAuth endpoints: apply the `0010_sso_refresh_tokens.sql` D1 migration and deploy the current Worker.
+- The OAuth userinfo API is not OpenID Connect: there is no discovery document or OIDC `id_token`. Integrators must use `/oauth/userinfo` and manage a local session.
 - For production, use HTTPS, protect session cookies and client secrets, redact authorization codes/tokens from logs, and map the stable `sub` to the local account.

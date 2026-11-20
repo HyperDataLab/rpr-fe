@@ -103,4 +103,6 @@ The admin account form uses `POST /api/workspace/profiles`; it is a profile-link
 
 Normal username/password accounts use the separate `POST /api/workspace/app-users` flow. Apply D1 migration `0008_app_user_logins.sql` before deploying the Worker. Username lookup remains private to the Worker; the browser only receives a Firebase custom token after password verification and active-profile checks.
 
+External applications can use SSO Authorization Code + PKCE through `/oauth/authorize` and `/oauth/token`. The token endpoint issues a one-hour access token and a rotating refresh token with a fixed 30-day lifetime. See [SSO API](./SSO_API.md) for the refresh request, revocation behavior, and integration details; apply `0010_sso_refresh_tokens.sql` before deploying this Worker version.
+
 Common status codes: 400 validation, 401 authentication, 403 permission, 404 missing user, 409 duplicate user, 429 rate limit, 500 internal error, 502 Google API failure, 503 missing/revoked connection.

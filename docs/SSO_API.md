@@ -15,19 +15,19 @@ Supported OAuth scopes:
 - `hyperdatalab_profile`: application role, student ID, and major/department.
 - `research_projects:read`: read only the research projects the signed-in user has actively joined, using the project API described in [EXTERNAL_RESEARCH_PROJECTS_API_VI.md](./EXTERNAL_RESEARCH_PROJECTS_API_VI.md).
 
-Administrators choose allowed scopes when registering an application and can update them later from **Edit scopes** in Connected applications. Changing scopes revokes existing access tokens and pending authorization codes; users must authorize again.
+Administrators choose allowed scopes when registering an application and can update them later from **Edit scopes** in Connected applications. Changing scopes revokes existing access and refresh tokens and pending authorization codes; users must authorize again.
 
 The userinfo response uses `sub` as the existing ResearchPulse profile UID. For username/password accounts, the `email` scope shares the profile's contact email; `email_verified` is false unless that profile's email was verified. Phone numbers are never shared.
 
 ## Register a relying application
 
-1. Apply the D1 migration: `npm run worker:migrate:remote`.
+1. Apply the latest D1 migrations, including `0010_sso_refresh_tokens.sql`: `npm run worker:migrate:remote`.
 2. Deploy the Worker: `npm run worker:deploy`.
 3. Sign in to ResearchPulse as an administrator and open `/admin/users`.
 4. In **Connected applications**, register the app, exact callback URL(s), and client type. Save the client secret immediately for a confidential client; it is only shown once.
 5. For a browser-only public client, select **Public** and use Authorization Code + PKCE S256. Register the exact callback URL served by the SPA. It may use any domain and port; the Worker derives the allowed CORS origin from each active Public client's registered callback. If an origin needs a static exception for the OAuth endpoints, add its exact origin to `SSO_BROWSER_ORIGINS` in `worker/wrangler.toml`; this does not grant CORS access to other Worker APIs. The browser follows the callback redirect as a top-level navigation (no CORS is involved in that redirect); CORS is needed only when the SPA calls the Worker's token/userinfo/revoke endpoints from the callback page.
 
-Use HTTPS callback URLs outside localhost. Do not use wildcard redirect URLs. Disable a client in the same admin section to prevent new authorizations and invalidate its existing access tokens.
+Use HTTPS callback URLs outside localhost. Do not use wildcard redirect URLs. Disable a client in the same admin section to prevent new authorizations and invalidate its existing access and refresh tokens.
 
 ## OAuth Authorization Code + PKCE
 
@@ -48,7 +48,18 @@ Content-Type: application/x-www-form-urlencoded
 grant_type=authorization_code&client_id=<client-id>&client_secret=<client-secret>&code=<code>&redirect_uri=<exact-callback>&code_verifier=<original-verifier>
 ```
 
-The response contains an opaque bearer access token and `expires_in: 3600`. Refresh tokens are not issued; after expiry, start a new authorization flow. Access tokens are stored hashed in D1 and bound to the client. The client secret is never sent to a browser for confidential clients.
+The response contains an opaque bearer access token (`expires_in: 3600`) and a refresh token (`refresh_token_expires_in: 2592000`). Refresh tokens are stored hashed in D1, bound to the client and profile, and expire 30 days after the initial authorization. Each refresh rotates the refresh token; the client must replace the old one immediately. Reuse of a rotated token revokes that token family. Access tokens are stored hashed in D1 and bound to the client. The client secret is never sent to a browser for confidential clients.
+
+Refresh an access token without sending the user through authorization again:
+
+```http
+POST https://<worker-host>/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token&client_id=<client-id>&client_secret=<client-secret>&refresh_token=<current-refresh-token>
+```
+
+Public clients omit `client_secret`; confidential clients may authenticate with HTTP Basic instead. A successful response has the same shape as the authorization-code response and includes a newly rotated `refresh_token`. The refresh token has a fixed 30-day lifetime and does not gain a new 30-day period during rotation. If it expires, is revoked, or the profile is no longer eligible, start a new authorization flow. Keep refresh tokens in protected server-side storage; a public client must use secure platform storage and treat them as credentials.
 
 Fetch the user's profile:
 
@@ -57,16 +68,16 @@ GET https://<worker-host>/oauth/userinfo
 Authorization: Bearer <access-token>
 ```
 
-Revoke an access token:
+Revoke an access token or refresh token (the associated token family is revoked):
 
 ```http
 POST https://<worker-host>/oauth/revoke
 Content-Type: application/json
 
-{"token":"<access-token>"}
+{"token":"<access-or-refresh-token>"}
 ```
 
-This is an OAuth 2.0 authorization and userinfo API. It does not issue an OpenID Connect ID token. An integrating application should validate the returned `sub` and treat the bearer token as a secret.
+This is an OAuth 2.0 authorization and userinfo API. It does not issue an OpenID Connect ID token. An integrating application should validate the returned `sub` and treat both access and refresh tokens as secrets.
 
 ## Local development and deployment
 

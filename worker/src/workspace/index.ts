@@ -1362,11 +1362,24 @@ async function deleteApplicationUser(uid: string, request: Request, env: Workspa
 }
 
 const ssoScopes = new Set(['email', 'profile', 'hyperdatalab_profile', 'research_projects:read']);
+const ssoAccessTokenLifetimeSeconds = 60 * 60;
+const ssoRefreshTokenLifetimeSeconds = 30 * 24 * 60 * 60;
 
 type SsoClientRow = {
   client_id: string; client_secret_hash: string | null; name: string; description: string | null;
   client_type: 'PUBLIC' | 'CONFIDENTIAL'; redirect_uris_json: string; allowed_scopes_json: string;
   is_active: number; created_at: string; updated_at: string;
+};
+
+type SsoRefreshTokenRow = {
+  token_hash: string;
+  family_id: string;
+  client_id: string;
+  profile_uid: string;
+  scopes_json: string;
+  expires_at: string;
+  revoked_at: string | null;
+  rotated_to_hash: string | null;
 };
 
 function ssoClientDto(client: SsoClientRow) {
@@ -1427,9 +1440,14 @@ async function setSsoClientActive(clientId: string, request: Request, env: Works
   const input = await parseJson(request);
   if (typeof input.isActive !== 'boolean') jsonError(400, 'VALIDATION_ERROR', 'isActive must be true or false.');
   const now = new Date().toISOString();
-  const result = await env.DB.prepare('UPDATE sso_clients SET is_active = ?, updated_at = ? WHERE client_id = ?')
-    .bind(input.isActive ? 1 : 0, now, clientId).run();
-  if (result.meta?.changes !== 1) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
+  const statements = [env.DB.prepare('UPDATE sso_clients SET is_active = ?, updated_at = ? WHERE client_id = ?')
+    .bind(input.isActive ? 1 : 0, now, clientId)];
+  if (!input.isActive) statements.push(
+    env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL').bind(now, clientId),
+    env.DB.prepare('UPDATE sso_refresh_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL').bind(now, clientId),
+  );
+  const result = await env.DB.batch(statements);
+  if (result[0].meta?.changes !== 1) jsonError(404, 'SSO_CLIENT_NOT_FOUND', 'Client was not found.');
   await audit(env, identity.uid, input.isActive ? 'SSO_CLIENT_ENABLED' : 'SSO_CLIENT_DISABLED', 'SUCCESS', clientId);
   return response({ clientId, isActive: input.isActive });
 }
@@ -1448,6 +1466,7 @@ async function updateSsoClientScopes(clientId: string, request: Request, env: Wo
   await env.DB.batch([
     env.DB.prepare('UPDATE sso_clients SET allowed_scopes_json = ?, updated_at = ? WHERE client_id = ?').bind(JSON.stringify(scopes), now, clientId),
     env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL').bind(now, clientId),
+    env.DB.prepare('UPDATE sso_refresh_tokens SET revoked_at = ? WHERE client_id = ? AND revoked_at IS NULL').bind(now, clientId),
     env.DB.prepare('DELETE FROM sso_authorization_requests WHERE client_id = ?').bind(clientId),
     env.DB.prepare('DELETE FROM sso_authorization_codes WHERE client_id = ?').bind(clientId),
   ]);
@@ -1464,6 +1483,7 @@ async function deleteSsoClient(clientId: string, env: WorkspaceEnv, identity: Wo
     env.DB.prepare('DELETE FROM sso_authorization_requests WHERE client_id = ?').bind(clientId),
     env.DB.prepare('DELETE FROM sso_authorization_codes WHERE client_id = ?').bind(clientId),
     env.DB.prepare('DELETE FROM sso_access_tokens WHERE client_id = ?').bind(clientId),
+    env.DB.prepare('DELETE FROM sso_refresh_tokens WHERE client_id = ?').bind(clientId),
     env.DB.prepare('DELETE FROM sso_clients WHERE client_id = ?').bind(clientId),
   ]);
   await audit(env, identity.uid, 'SSO_CLIENT_DELETED', 'SUCCESS', clientId, client.name);
@@ -1554,9 +1574,90 @@ async function validateSsoClientSecret(client: SsoClientRow, secret: unknown) {
   return difference === 0;
 }
 
+function ssoTokenResponse(accessToken: string, refreshToken: string, refreshExpiresAt: string, scopesJson: string) {
+  return Response.json({
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: ssoAccessTokenLifetimeSeconds,
+    refresh_token: refreshToken,
+    refresh_token_expires_in: Math.max(0, Math.floor((Date.parse(refreshExpiresAt) - Date.now()) / 1000)),
+    scope: (JSON.parse(scopesJson) as string[]).join(' '),
+  }, { headers: { 'cache-control': 'no-store' } });
+}
+
+async function revokeSsoRefreshFamily(env: WorkspaceEnv, familyId: string, now: string) {
+  await env.DB.batch([
+    env.DB.prepare('UPDATE sso_refresh_tokens SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL').bind(now, familyId),
+    env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE refresh_family_id = ? AND revoked_at IS NULL').bind(now, familyId),
+  ]);
+}
+
+async function isSsoProfileEligible(env: WorkspaceEnv, uid: string): Promise<boolean> {
+  const serviceToken = await createFirebaseServiceAccessToken(env, 'https://www.googleapis.com/auth/datastore');
+  const profileResponse = await fetch(`${firestoreBase(env)}/userProfiles/${encodeURIComponent(uid)}`, {
+    headers: { authorization: `Bearer ${serviceToken}` }, signal: AbortSignal.timeout(8000),
+  });
+  if (profileResponse.status === 404) return false;
+  if (!profileResponse.ok) jsonError(503, 'PROFILE_LOOKUP_FAILED', 'Could not verify the application profile. Retry the token request.');
+  const document = await profileResponse.json() as FirestoreDocument;
+  const profile = Object.fromEntries(Object.entries(document.fields || {}).map(([key, value]) => [key, decodeFirestoreValue(value)])) as Record<string, unknown>;
+  return profile.status === 'APPROVED' && profile.isActive === true
+    && ['ADMIN', 'LECTURER', 'STUDENT'].includes(String(profile.role));
+}
+
+async function refreshSsoToken(env: WorkspaceEnv, clientId: string, input: Record<string, unknown>) {
+  const refreshToken = typeof input.refresh_token === 'string' ? input.refresh_token : '';
+  if (!refreshToken) jsonError(400, 'INVALID_REQUEST', 'refresh_token is required for the refresh_token grant.');
+  const tokenHash = await sha256(refreshToken);
+  const record = await env.DB.prepare(`SELECT token_hash, family_id, client_id, profile_uid, scopes_json, expires_at, revoked_at, rotated_to_hash
+    FROM sso_refresh_tokens WHERE token_hash = ? AND client_id = ?`)
+    .bind(tokenHash, clientId).first<SsoRefreshTokenRow>();
+  if (!record) jsonError(400, 'INVALID_GRANT', 'The refresh token is invalid or expired. Sign in again.');
+  if (record.revoked_at) {
+    if (record.rotated_to_hash) await revokeSsoRefreshFamily(env, record.family_id, new Date().toISOString());
+    jsonError(400, 'INVALID_GRANT', 'The refresh token is invalid or expired. Sign in again.');
+  }
+  const now = new Date().toISOString();
+  if (record.expires_at <= now) jsonError(400, 'INVALID_GRANT', 'The refresh token is invalid or expired. Sign in again.');
+  if (!await isSsoProfileEligible(env, record.profile_uid)) {
+    await revokeSsoRefreshFamily(env, record.family_id, now);
+    jsonError(400, 'INVALID_GRANT', 'The refresh token is invalid or expired. Sign in again.');
+  }
+
+  const nextAccessToken = randomToken(40);
+  const nextRefreshToken = randomToken(40);
+  const nextAccessHash = await sha256(nextAccessToken);
+  const nextRefreshHash = await sha256(nextRefreshToken);
+  const rotatedAt = new Date().toISOString();
+  const rotation = await env.DB.batch([
+    env.DB.prepare(`UPDATE sso_refresh_tokens SET revoked_at = ?, rotated_to_hash = ?
+      WHERE token_hash = ? AND client_id = ? AND revoked_at IS NULL AND expires_at > ?`)
+      .bind(rotatedAt, nextRefreshHash, tokenHash, clientId, rotatedAt),
+    env.DB.prepare(`INSERT INTO sso_access_tokens
+      (token_hash, client_id, profile_uid, scopes_json, expires_at, revoked_at, created_at, refresh_family_id)
+      SELECT ?, ?, ?, ?, ?, NULL, ?, ? WHERE EXISTS (
+        SELECT 1 FROM sso_refresh_tokens WHERE token_hash = ? AND rotated_to_hash = ? AND revoked_at = ?)`)
+      .bind(nextAccessHash, record.client_id, record.profile_uid, record.scopes_json,
+        new Date(Date.now() + ssoAccessTokenLifetimeSeconds * 1000).toISOString(), rotatedAt, record.family_id,
+        tokenHash, nextRefreshHash, rotatedAt),
+    env.DB.prepare(`INSERT INTO sso_refresh_tokens
+      (token_hash, family_id, client_id, profile_uid, scopes_json, expires_at, revoked_at, created_at, rotated_to_hash)
+      SELECT ?, ?, ?, ?, ?, ?, NULL, ?, NULL WHERE EXISTS (
+        SELECT 1 FROM sso_refresh_tokens WHERE token_hash = ? AND rotated_to_hash = ? AND revoked_at = ?)`)
+      .bind(nextRefreshHash, record.family_id, record.client_id, record.profile_uid, record.scopes_json,
+        record.expires_at, rotatedAt, tokenHash, nextRefreshHash, rotatedAt),
+  ]);
+  if (rotation[0].meta?.changes !== 1 || rotation[1].meta?.changes !== 1 || rotation[2].meta?.changes !== 1) {
+    const latest = await env.DB.prepare('SELECT revoked_at, rotated_to_hash FROM sso_refresh_tokens WHERE token_hash = ? AND client_id = ?')
+      .bind(tokenHash, clientId).first<{ revoked_at: string | null; rotated_to_hash: string | null }>();
+    if (latest?.rotated_to_hash) await revokeSsoRefreshFamily(env, record.family_id, new Date().toISOString());
+    jsonError(400, 'INVALID_GRANT', 'The refresh token is invalid or expired. Sign in again.');
+  }
+  return ssoTokenResponse(nextAccessToken, nextRefreshToken, record.expires_at, record.scopes_json);
+}
+
 async function exchangeSsoCode(request: Request, env: WorkspaceEnv) {
   const input = await parseOAuthBody(request);
-  if (input.grant_type !== 'authorization_code') jsonError(400, 'UNSUPPORTED_GRANT_TYPE', 'Only authorization_code is supported.');
   let basicCredentials: { clientId: string; clientSecret: string } | null = null;
   const authorization = request.headers.get('authorization') || '';
   const basic = authorization.match(/^Basic\s+([A-Za-z0-9+/]+={0,2})$/i)?.[1];
@@ -1571,6 +1672,8 @@ async function exchangeSsoCode(request: Request, env: WorkspaceEnv) {
   const client = await env.DB.prepare('SELECT * FROM sso_clients WHERE client_id = ? AND is_active = 1').bind(clientId).first<SsoClientRow>();
   const clientSecret = typeof input.client_secret === 'string' ? input.client_secret : basicCredentials?.clientSecret;
   if (!client || !await validateSsoClientSecret(client, clientSecret)) jsonError(401, 'INVALID_CLIENT', 'Client credentials are invalid.');
+  if (input.grant_type === 'refresh_token') return await refreshSsoToken(env, clientId, input);
+  if (input.grant_type !== 'authorization_code') jsonError(400, 'UNSUPPORTED_GRANT_TYPE', 'Supported grant types are authorization_code and refresh_token.');
   const code = typeof input.code === 'string' ? input.code : '';
   const redirectUri = typeof input.redirect_uri === 'string' ? input.redirect_uri : '';
   const verifier = typeof input.code_verifier === 'string' ? input.code_verifier : '';
@@ -1585,11 +1688,24 @@ async function exchangeSsoCode(request: Request, env: WorkspaceEnv) {
     .bind(new Date().toISOString(), hash, new Date().toISOString()).run();
   if (consumed.meta?.changes !== 1) jsonError(400, 'INVALID_GRANT', 'Authorization code was already used.');
   const token = randomToken(40);
+  const refreshToken = randomToken(40);
+  const familyId = crypto.randomUUID();
   const now = new Date().toISOString();
-  await env.DB.prepare('DELETE FROM sso_access_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL').bind(now).run();
-  await env.DB.prepare('INSERT INTO sso_access_tokens (token_hash, client_id, profile_uid, scopes_json, expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)')
-    .bind(await sha256(token), clientId, record.profile_uid, record.scopes_json, new Date(Date.now() + 60 * 60 * 1000).toISOString(), now).run();
-  return Response.json({ access_token: token, token_type: 'Bearer', expires_in: 3600, scope: (JSON.parse(record.scopes_json) as string[]).join(' ') }, { headers: { 'cache-control': 'no-store' } });
+  const refreshExpiresAt = new Date(Date.now() + ssoRefreshTokenLifetimeSeconds * 1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sso_access_tokens WHERE expires_at <= ? OR revoked_at IS NOT NULL').bind(now),
+    env.DB.prepare('DELETE FROM sso_refresh_tokens WHERE expires_at <= ?').bind(now),
+    env.DB.prepare(`INSERT INTO sso_access_tokens
+      (token_hash, client_id, profile_uid, scopes_json, expires_at, revoked_at, created_at, refresh_family_id)
+      VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`)
+      .bind(await sha256(token), clientId, record.profile_uid, record.scopes_json,
+        new Date(Date.now() + ssoAccessTokenLifetimeSeconds * 1000).toISOString(), now, familyId),
+    env.DB.prepare(`INSERT INTO sso_refresh_tokens
+      (token_hash, family_id, client_id, profile_uid, scopes_json, expires_at, revoked_at, created_at, rotated_to_hash)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)`)
+      .bind(await sha256(refreshToken), familyId, clientId, record.profile_uid, record.scopes_json, refreshExpiresAt, now),
+  ]);
+  return ssoTokenResponse(token, refreshToken, refreshExpiresAt, record.scopes_json);
 }
 
 async function ssoUserInfo(request: Request, env: WorkspaceEnv) {
@@ -1654,8 +1770,20 @@ async function authenticateSsoProjectRequest(request: Request, env: WorkspaceEnv
 async function revokeSsoToken(request: Request, env: WorkspaceEnv) {
   const input = await parseOAuthBody(request);
   const token = typeof input.token === 'string' ? input.token : '';
-  if (token) await env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
-    .bind(new Date().toISOString(), await sha256(token)).run();
+  if (token) {
+    const tokenHash = await sha256(token);
+    const [accessRecord, refreshRecord] = await Promise.all([
+      env.DB.prepare('SELECT refresh_family_id FROM sso_access_tokens WHERE token_hash = ?').bind(tokenHash).first<{ refresh_family_id: string | null }>(),
+      env.DB.prepare('SELECT family_id FROM sso_refresh_tokens WHERE token_hash = ?').bind(tokenHash).first<{ family_id: string }>(),
+    ]);
+    const familyId = refreshRecord?.family_id || accessRecord?.refresh_family_id;
+    const now = new Date().toISOString();
+    if (familyId) await revokeSsoRefreshFamily(env, familyId, now);
+    await env.DB.batch([
+      env.DB.prepare('UPDATE sso_access_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL').bind(now, tokenHash),
+      env.DB.prepare('UPDATE sso_refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL').bind(now, tokenHash),
+    ]);
+  }
   return Response.json({}, { headers: { 'cache-control': 'no-store' } });
 }
 

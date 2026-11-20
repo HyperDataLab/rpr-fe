@@ -35,7 +35,7 @@ The local Worker listens on `http://localhost:8787`. Wrangler uses a local R2 em
 
 Optional local Worker secrets go in `worker/.dev.vars`, which is ignored by Git. See `.dev.vars.example` for variable names.
 
-Google Workspace, username/password account, and research-project flows require a D1 database. Create it, replace the D1 UUID placeholder in `wrangler.toml`, apply all files in `worker/migrations` (including `0009_research_projects.sql`), configure Firebase service-account/Web API key, Google OAuth and Resend Worker secrets, then connect an approved Workspace administrator in the Admin account page. Follow [Google Workspace setup](../docs/GOOGLE_WORKSPACE_SETUP.md), [API reference](../docs/API_REFERENCE.md), [frontend integration](../docs/FRONTEND_INTEGRATION.md), and [security notes](../docs/SECURITY.md).
+Google Workspace, username/password account, SSO refresh-token, and research-project flows require a D1 database. Create it, replace the D1 UUID placeholder in `wrangler.toml`, apply all files in `worker/migrations` (including `0010_sso_refresh_tokens.sql`), configure Firebase service-account/Web API key, Google OAuth and Resend Worker secrets, then connect an approved Workspace administrator in the Admin account page. Follow [Google Workspace setup](../docs/GOOGLE_WORKSPACE_SETUP.md), [API reference](../docs/API_REFERENCE.md), [SSO API](../docs/SSO_API.md), [frontend integration](../docs/FRONTEND_INTEGRATION.md), and [security notes](../docs/SECURITY.md).
 
 ## Deploy
 
