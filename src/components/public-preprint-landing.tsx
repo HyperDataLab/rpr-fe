@@ -46,26 +46,58 @@ function scrollToRegister(e?: React.MouseEvent) {
   });
 }
 
+type ToolIconName = 'trend' | 'repository' | 'journal' | 'review' | 'writing' | 'experiment' | 'research';
+
+function ToolIcon({ name }: { name: ToolIconName }) {
+  const common = {
+    'aria-hidden': true as const,
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    strokeWidth: 1.6,
+    viewBox: '0 0 24 24',
+  };
+
+  switch (name) {
+    case 'trend':
+      return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /><path d="m7 14 3-3 2 2 4-4" /></svg>;
+    case 'repository':
+      return <svg {...common}><path d="M6 3.75h9l3 3v13.5H6z" /><path d="M15 3.75v3h3M9 11h6M9 14h6M9 17h4" /></svg>;
+    case 'journal':
+      return <svg {...common}><path d="M4.5 19.25V5.5A2.5 2.5 0 0 1 7 3h12.5v16.25H7a2.5 2.5 0 0 0-2.5 2.5" /><path d="M4.5 19.25A2.5 2.5 0 0 1 7 16.75h12.5M9 7h7M9 10h7" /></svg>;
+    case 'review':
+      return <svg {...common}><path d="M8 4.5H5.5v16h13V4.5H16M9 4.5a2 2 0 0 1 4 0v1H9z" /><path d="m8.5 12 1.5 1.5 3-3M8.5 17h6" /></svg>;
+    case 'writing':
+      return <svg {...common}><path d="m4 16.5-.8 4.3 4.3-.8L19 8.5 15.5 5zM13.8 6.7l3.5 3.5M4 21h16" /></svg>;
+    case 'experiment':
+      return <svg {...common}><path d="M9 3.5h6M10 3.5v6L5 18a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-8.5v-6" /><path d="M7.4 15h9.2M9.5 18h5" /></svg>;
+    case 'research':
+      return <svg {...common}><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z" /><path d="M4 5.5v16M8 7h8M8 10h8M8 13h6" /></svg>;
+  }
+
+  return null;
+}
+
+function ExternalLinkIcon() {
+  return <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 2.75h4.25V7M13 3 7.25 8.75" /><path d="M11.5 8.5v4.25h-9v-9h4.25" /></svg>;
+}
+
 const TOOL_GROUPS = [
   {
     id: 'literature-review',
-    label: 'Tổng quan tài liệu',
-    order: 1,
-  },
-  {
-    id: 'academic-writing',
-    label: 'Viết học thuật',
+    label: 'Quản lý & tổng quan',
     order: 2,
   },
   {
-    id: 'publication-search',
-    label: 'Tra cứu công bố',
+    id: 'academic-writing',
+    label: 'Viết & công bố',
     order: 3,
   },
   {
     id: 'journal-analysis',
-    label: 'Phân tích tạp chí',
-    order: 4,
+    label: 'Khám phá & phân tích',
+    order: 1,
   },
 ] as const;
 
@@ -75,35 +107,69 @@ const RESEARCH_TOOLS = [
     groupId: 'literature-review',
     name: 'Systematic Literature Review',
     description: 'Quản lý và sàng lọc nghiên cứu tổng quan có hệ thống.',
-    icon: '⌕',
     url: 'https://slr.hyperdatalab.org',
-    order: 1,
+    icon: 'review',
+    openInNewTab: true,
+    order: 2,
   },
   {
     id: 'writing-bank',
     groupId: 'academic-writing',
     name: 'Writing Bank',
     description: 'Tham khảo tài nguyên và hướng dẫn viết học thuật.',
-    icon: '✎',
     url: 'https://hyperdatalab-writing-bank.web.app',
-    order: 1,
+    icon: 'writing',
+    openInNewTab: true,
+    order: 2,
   },
   {
     id: 'academic-publication-repository',
-    groupId: 'publication-search',
+    groupId: 'journal-analysis',
     name: 'Academic Publication Repository',
     description: 'Tra cứu kho công bố và tài liệu nghiên cứu học thuật.',
-    icon: '▤',
     url: 'https://aprkb.hyperdatalab.org',
-    order: 1,
+    icon: 'repository',
+    openInNewTab: true,
+    order: 2,
   },
   {
     id: 'journal-system-miner',
     groupId: 'journal-analysis',
     name: 'JSM – Journal System Miner',
     description: 'Khai thác và phân tích dữ liệu hệ thống tạp chí khoa học.',
-    icon: '◈',
     url: 'https://jsm.hyperdatalab.org/',
+    icon: 'journal',
+    openInNewTab: true,
+    order: 3,
+  },
+  {
+    id: 'global-research-trends',
+    groupId: 'journal-analysis',
+    name: 'Global Research Trends',
+    description: 'Khám phá xu hướng nghiên cứu.',
+    url: 'https://global.hyperdatalab.org/',
+    icon: 'trend',
+    openInNewTab: true,
+    order: 1,
+  },
+  {
+    id: 'srd',
+    groupId: 'literature-review',
+    name: 'SRD',
+    description: 'Quản lí experiment, làm sạch data.',
+    url: 'https://srd.hyperdatalab.org/',
+    icon: 'experiment',
+    openInNewTab: true,
+    order: 1,
+  },
+  {
+    id: 'researchhub',
+    groupId: 'academic-writing',
+    name: 'ResearchHub',
+    description: 'Cổng nghiên cứu paper và viết bài.',
+    url: 'https://researchhub.hyperdatalab.org/',
+    icon: 'research',
+    openInNewTab: true,
     order: 1,
   },
 ] as const;
@@ -247,7 +313,6 @@ export default function PublicPreprintLanding() {
                 ref={toolsMenuToggleRef}
                 type="button"
                 className="pl-nav__link pl-tools-menu__toggle"
-                aria-haspopup="true"
                 aria-expanded={toolsMenuOpen}
                 aria-controls="pl-tools-menu-panel"
                 onClick={() => {
@@ -287,21 +352,22 @@ export default function PublicPreprintLanding() {
                       aria-labelledby={activeToolGroup ? `pl-tool-group-${activeToolGroup.id}` : undefined}
                       tabIndex={0}
                     >
-                      <h2>{activeToolGroup?.label}</h2>
                       <div className="pl-tools-menu__list" aria-label={`Công cụ thuộc nhóm ${activeToolGroup?.label ?? ''}`}>
                         {activeGroupTools.map((tool) => (
                           <a
                             key={tool.id}
                             className="pl-tools-menu__row"
                             href={tool.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            target={tool.openInNewTab ? '_blank' : undefined}
+                            rel={tool.openInNewTab ? 'noopener noreferrer' : undefined}
                             onClick={() => setToolsMenuOpen(false)}
                           >
-                            <span className="pl-tools-menu__row-icon" aria-hidden="true">{tool.icon}</span>
-                            <span className="pl-tools-menu__row-name">{tool.name}</span>
-                            <span className="pl-tools-menu__row-description">{tool.description}</span>
-                            <span className="pl-tools-menu__row-arrow" aria-hidden="true">↗</span>
+                            <span className="pl-tools-menu__row-icon"><ToolIcon name={tool.icon} /></span>
+                            <span className="pl-tools-menu__row-copy">
+                              <span className="pl-tools-menu__row-name">{tool.name}</span>
+                              <span className="pl-tools-menu__row-description">{tool.description}</span>
+                            </span>
+                            {tool.openInNewTab && <span className="pl-tools-menu__row-arrow"><ExternalLinkIcon /></span>}
                           </a>
                         ))}
                       </div>
@@ -371,14 +437,17 @@ export default function PublicPreprintLanding() {
                             <a
                               key={tool.id}
                               href={tool.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                              target={tool.openInNewTab ? '_blank' : undefined}
+                              rel={tool.openInNewTab ? 'noopener noreferrer' : undefined}
                               onClick={() => setMobileMenuOpen(false)}
                               className="pl-mobile-nav__tool-link"
                             >
-                              <span className="pl-mobile-nav__tool-icon" aria-hidden="true">{tool.icon}</span>
-                              <span>{tool.name}</span>
-                              <span aria-hidden="true" className="pl-mobile-nav__tool-arrow">↗</span>
+                              <span className="pl-mobile-nav__tool-icon"><ToolIcon name={tool.icon} /></span>
+                              <span className="pl-tools-menu__row-copy">
+                                <span className="pl-tools-menu__row-name">{tool.name}</span>
+                                <span className="pl-tools-menu__row-description">{tool.description}</span>
+                              </span>
+                              {tool.openInNewTab && <span className="pl-mobile-nav__tool-arrow"><ExternalLinkIcon /></span>}
                             </a>
                           ))}
                         </div>
